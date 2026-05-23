@@ -31,7 +31,7 @@ public sealed class MemoryTools(
     public async Task<SearchResultsResponse> MemorySearch(
         [Description("Search query text.")] string query,
         [Description("Maximum number of results to return.")] int limit = 10,
-        [Description("Optional repository-relative scope prefix, for example projects/.")] string? scope = null,
+        [Description("Optional repository-relative scope prefix such as \"projects/\" or \"research/topic\" that restricts results to matching nodes.")] string? scope = null,
         CancellationToken cancellationToken = default)
     {
         var results = await searchService.SearchAsync(repositoryContext.GetServiceWorkingDirectory(), query, cancellationToken, limit, scope);
@@ -43,7 +43,7 @@ public sealed class MemoryTools(
     public async Task<RecentItemsResponse> MemoryRecent(
         [Description("How many days back to scan.")] int days = 30,
         [Description("Maximum number of items to return.")] int limit = 10,
-        [Description("Optional repository-relative scope prefix, for example projects/.")] string? scope = null,
+        [Description("Optional repository-relative scope prefix such as \"projects/\" or \"research/topic\" that restricts results to matching nodes.")] string? scope = null,
         CancellationToken cancellationToken = default)
     {
         var items = await searchService.GetRecentAsync(repositoryContext.GetServiceWorkingDirectory(), limit, days, scope, cancellationToken);

@@ -211,7 +211,8 @@ public sealed class SearchService(
             return null;
         }
 
-        return scope.Trim().Trim('/');
+        var normalized = scope.Trim().Replace('\\', '/').Trim('/');
+        return normalized.Length == 0 ? null : normalized;
     }
 
     private static bool MatchesScope(string relativePath, string scope)

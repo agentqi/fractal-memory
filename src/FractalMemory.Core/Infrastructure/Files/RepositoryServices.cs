@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Globalization;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using FractalMemory.Core.Application.Services;
@@ -171,7 +172,7 @@ public sealed class NodeService(
 
     public string NormalizeNodePath(string inputPath) => NodePathRules.Normalize(inputPath);
 
-    private sealed record NodeListingCacheEntry(DateTimeOffset Fingerprint, IReadOnlyList<MemoryNode> Nodes);
+    private sealed record NodeListingCacheEntry(string Fingerprint, IReadOnlyList<MemoryNode> Nodes);
 
     public async Task<MemoryNode> CreateNodeAsync(
         string workingDirectory,
@@ -216,7 +217,7 @@ public sealed class NodeService(
         var storageRoot = repositoryService.GetStorageRoot(repositoryRoot);
         var fingerprint = ComputeNodeFingerprint(storageRoot);
         var cacheKey = Path.GetFullPath(repositoryRoot);
-        if (_nodeListingCache.TryGetValue(cacheKey, out var cached) && cached.Fingerprint == fingerprint)
+        if (_nodeListingCache.TryGetValue(cacheKey, out var cached) && string.Equals(cached.Fingerprint, fingerprint, StringComparison.Ordinal))
         {
             return cached.Nodes;
         }
@@ -250,22 +251,31 @@ public sealed class NodeService(
         return ordered;
     }
 
-    private DateTimeOffset ComputeNodeFingerprint(string storageRoot) =>
+    private string ComputeNodeFingerprint(string storageRoot) =>
         ComputeNodeFingerprintForCache(fileSystemService, storageRoot);
 
-    internal static DateTimeOffset ComputeNodeFingerprintForCache(IFileSystemService fileSystem, string storageRoot)
+    internal static string ComputeNodeFingerprintForCache(IFileSystemService fileSystem, string storageRoot)
     {
-        var latest = DateTimeOffset.MinValue;
+        var entries = new SortedDictionary<string, long>(StringComparer.Ordinal);
         foreach (var file in EnumerateNodeFingerprintFilesStatic(fileSystem, storageRoot))
         {
-            var mtime = fileSystem.GetLastWriteTimeUtc(file);
-            if (mtime > latest)
-            {
-                latest = mtime;
-            }
+            var relative = Path.GetRelativePath(storageRoot, file).Replace(Path.DirectorySeparatorChar, '/');
+            entries[relative] = fileSystem.GetLastWriteTimeUtc(file).UtcTicks;
         }
 
-        return latest;
+        if (entries.Count == 0)
+        {
+            return "0:empty";
+        }
+
+        var builder = new StringBuilder();
+        foreach (var (path, mtime) in entries)
+        {
+            builder.Append(path).Append('|').Append(mtime).Append('\n');
+        }
+
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(builder.ToString()));
+        return $"{entries.Count}:{Convert.ToHexString(hash)}";
     }
 
     private static IEnumerable<string> EnumerateNodeFingerprintFilesStatic(IFileSystemService fileSystem, string storageRoot)

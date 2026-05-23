@@ -72,7 +72,7 @@ public sealed class IndexService(
         await RefreshCacheAsync(indexRoot, nodes, fingerprint, cancellationToken);
     }
 
-    private async Task RefreshCacheAsync(string indexRoot, IReadOnlyList<MemoryNode> nodes, DateTimeOffset fingerprint, CancellationToken cancellationToken)
+    private async Task RefreshCacheAsync(string indexRoot, IReadOnlyList<MemoryNode> nodes, string fingerprint, CancellationToken cancellationToken)
     {
         var cacheRoot = Path.Combine(indexRoot, "cache");
         var nodeCacheRoot = Path.Combine(cacheRoot, "nodes");

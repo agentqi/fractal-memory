@@ -627,6 +627,113 @@ public sealed class RetrievalAndSchemaTests
     }
 
     [Fact]
+    public async Task NodeListingCacheInvalidatesWhenNodeIsDeleted()
+    {
+        using var provider = TestEnvironment.CreateServices();
+        var repositoryService = provider.GetRequiredService<IRepositoryService>();
+        var nodeService = provider.GetRequiredService<INodeService>();
+        var searchService = provider.GetRequiredService<ISearchService>();
+        var temp = TestEnvironment.CreateTempDirectory();
+
+        await repositoryService.InitializeAsync(temp, CancellationToken.None);
+        await nodeService.CreateNodeAsync(temp, "projects/keeper", CancellationToken.None);
+        await nodeService.CreateNodeAsync(temp, "projects/deletable", CancellationToken.None);
+
+        var before = await searchService.SearchAsync(temp, "projects/deletable", CancellationToken.None);
+        Assert.Contains(before, item => item.RelativePath == "projects/deletable");
+
+        Directory.Delete(Path.Combine(temp, ".fractal-memory", "projects", "deletable"), recursive: true);
+
+        var after = await searchService.SearchAsync(temp, "projects/deletable", CancellationToken.None);
+        Assert.DoesNotContain(after, item => item.RelativePath == "projects/deletable");
+    }
+
+    [Fact]
+    public async Task SearchScopeNormalizesWindowsSeparators()
+    {
+        using var provider = TestEnvironment.CreateServices();
+        var repositoryService = provider.GetRequiredService<IRepositoryService>();
+        var nodeService = provider.GetRequiredService<INodeService>();
+        var searchService = provider.GetRequiredService<ISearchService>();
+        var temp = TestEnvironment.CreateTempDirectory();
+
+        await repositoryService.InitializeAsync(temp, CancellationToken.None);
+        await nodeService.CreateNodeAsync(temp, "projects/win-sep", CancellationToken.None);
+        await nodeService.CreateNodeAsync(temp, "research/win-sep", CancellationToken.None);
+
+        await File.WriteAllTextAsync(Path.Combine(temp, ".fractal-memory", "projects", "win-sep", "state.md"), """
+            ---
+            title: Win Sep Projects
+            ---
+
+            ## Current Objective
+
+            Windows separator scope target line.
+            """);
+        await File.WriteAllTextAsync(Path.Combine(temp, ".fractal-memory", "research", "win-sep", "state.md"), """
+            ---
+            title: Win Sep Research
+            ---
+
+            ## Current Objective
+
+            Windows separator scope target line.
+            """);
+
+        var results = await searchService.SearchAsync(temp, "windows separator scope target", CancellationToken.None, scope: "projects\\");
+
+        Assert.NotEmpty(results);
+        Assert.All(results, item => Assert.StartsWith("projects/", item.RelativePath, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void YamlFrontMatterQuotesReservedLiteralsAndNumericStrings()
+    {
+        var metadata = new NodeMetadata
+        {
+            Title = "yes",
+            Aliases = ["true", "42", "1.5", "n"],
+            Summary = "null",
+        };
+
+        var rendered = FractalMemory.Core.Infrastructure.Parsing.YamlFrontMatterParser.Render(metadata);
+        var parsed = new FractalMemory.Core.Infrastructure.Parsing.YamlFrontMatterParser().Parse(rendered + "\n\nBody.");
+
+        Assert.Equal("yes", parsed.Metadata.Title);
+        Assert.Equal("null", parsed.Metadata.Summary);
+        Assert.Equal(metadata.Aliases.OrderBy(a => a, StringComparer.Ordinal), parsed.Metadata.Aliases.OrderBy(a => a, StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public async Task OnDiskCacheRejectsManifestWithPathTraversalEntry()
+    {
+        var workingDirectory = TestEnvironment.CreateTempDirectory();
+
+        using (var primingProvider = TestEnvironment.CreateServices())
+        {
+            var repositoryService = primingProvider.GetRequiredService<IRepositoryService>();
+            var nodeService = primingProvider.GetRequiredService<INodeService>();
+            var indexService = primingProvider.GetRequiredService<IIndexService>();
+
+            await repositoryService.InitializeAsync(workingDirectory, CancellationToken.None);
+            await nodeService.CreateNodeAsync(workingDirectory, "projects/traversal", CancellationToken.None);
+            await indexService.RefreshAsync(workingDirectory, CancellationToken.None);
+        }
+
+        var manifestPath = Path.Combine(workingDirectory, ".fractal-memory", "indexes", "cache", "manifest.json");
+        var manifestText = await File.ReadAllTextAsync(manifestPath);
+        var tampered = manifestText.Replace("projects_traversal.json", "../../../etc/passwd");
+        await File.WriteAllTextAsync(manifestPath, tampered);
+
+        using var coldProvider = TestEnvironment.CreateServices();
+        var coldSearchService = coldProvider.GetRequiredService<ISearchService>();
+        var results = await coldSearchService.SearchAsync(workingDirectory, "projects/traversal", CancellationToken.None);
+
+        Assert.NotEmpty(results);
+        Assert.Contains(results, item => item.RelativePath == "projects/traversal");
+    }
+
+    [Fact]
     public async Task CacheManifestPreservesInspectableNodeEntries()
     {
         using var provider = TestEnvironment.CreateServices();

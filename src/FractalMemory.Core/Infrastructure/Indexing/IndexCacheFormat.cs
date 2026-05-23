@@ -5,7 +5,7 @@ namespace FractalMemory.Core.Infrastructure.Indexing;
 internal sealed class IndexCacheManifest
 {
     public DateTimeOffset RefreshedAt { get; set; }
-    public DateTimeOffset Fingerprint { get; set; }
+    public string Fingerprint { get; set; } = string.Empty;
     public Dictionary<string, IndexCacheManifestEntry> Nodes { get; set; } = new(StringComparer.Ordinal);
 }
 

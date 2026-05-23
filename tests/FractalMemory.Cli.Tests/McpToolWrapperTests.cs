@@ -9,7 +9,7 @@ namespace FractalMemory.Cli.Tests;
 public sealed class McpToolWrapperTests
 {
     [Fact]
-    public async Task MemorySearchToolDelegatesToSearchServiceAndAppliesLimit()
+    public async Task MemorySearchToolForwardsLimitAndScopeToService()
     {
         var expected = new[]
         {
@@ -44,12 +44,12 @@ public sealed class McpToolWrapperTests
             new StubValidationService(),
             context);
 
-        var response = await tools.MemorySearch("alpha", 1, cancellationToken: CancellationToken.None);
+        var response = await tools.MemorySearch("alpha", limit: 1, scope: "projects/", cancellationToken: CancellationToken.None);
 
-        Assert.Equal(2, response.Results.Count);
-        Assert.Equal("projects/alpha", response.Results[0].RelativePath);
         Assert.Equal("/repo-root", searchService.LastWorkingDirectory);
         Assert.Equal(1, searchService.LastLimit);
+        Assert.Equal("projects/", searchService.LastScope);
+        Assert.Equal(2, response.Results.Count);
     }
 
     private sealed class StubSearchService(IReadOnlyList<SearchResult> results) : ISearchService

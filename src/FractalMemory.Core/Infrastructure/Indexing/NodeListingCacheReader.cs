@@ -6,14 +6,14 @@ namespace FractalMemory.Core.Infrastructure.Indexing;
 
 public interface INodeListingCacheReader
 {
-    Task<IReadOnlyList<MemoryNode>?> TryLoadAsync(string repositoryRoot, DateTimeOffset fingerprint, CancellationToken cancellationToken);
+    Task<IReadOnlyList<MemoryNode>?> TryLoadAsync(string repositoryRoot, string fingerprint, CancellationToken cancellationToken);
 }
 
 public sealed class NodeListingCacheReader(
     IRepositoryService repositoryService,
     IFileSystemService fileSystemService) : INodeListingCacheReader
 {
-    public async Task<IReadOnlyList<MemoryNode>?> TryLoadAsync(string repositoryRoot, DateTimeOffset fingerprint, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<MemoryNode>?> TryLoadAsync(string repositoryRoot, string fingerprint, CancellationToken cancellationToken)
     {
         var storageRoot = repositoryService.GetStorageRoot(repositoryRoot);
         var cacheRoot = Path.Combine(storageRoot, "indexes", "cache");
@@ -34,15 +34,26 @@ public sealed class NodeListingCacheReader(
             return null;
         }
 
-        if (manifest is null || manifest.Fingerprint != fingerprint)
+        if (manifest is null || !string.Equals(manifest.Fingerprint, fingerprint, StringComparison.Ordinal))
         {
             return null;
         }
 
+        var nodeCacheRoot = Path.Combine(cacheRoot, "nodes");
         var nodes = new List<MemoryNode>(manifest.Nodes.Count);
         foreach (var (relativePath, entry) in manifest.Nodes)
         {
-            var cacheFilePath = Path.Combine(cacheRoot, "nodes", entry.CacheFile);
+            if (!IsSafeCacheFileName(entry.CacheFile))
+            {
+                return null;
+            }
+
+            var cacheFilePath = Path.Combine(nodeCacheRoot, entry.CacheFile);
+            if (!IsContainedIn(nodeCacheRoot, cacheFilePath))
+            {
+                return null;
+            }
+
             if (!fileSystemService.FileExists(cacheFilePath))
             {
                 return null;
@@ -82,5 +93,36 @@ public sealed class NodeListingCacheReader(
         }
 
         return nodes.OrderBy(node => node.RelativePath, StringComparer.Ordinal).ToArray();
+    }
+
+    private static bool IsSafeCacheFileName(string fileName)
+    {
+        if (string.IsNullOrWhiteSpace(fileName))
+        {
+            return false;
+        }
+
+        if (Path.GetFileName(fileName) != fileName)
+        {
+            return false;
+        }
+
+        if (fileName.Contains("..", StringComparison.Ordinal) ||
+            fileName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 ||
+            fileName.Contains('/', StringComparison.Ordinal) ||
+            fileName.Contains('\\', StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        return fileName.EndsWith(".json", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsContainedIn(string root, string candidate)
+    {
+        var normalizedRoot = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var normalizedCandidate = Path.GetFullPath(candidate);
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        return normalizedCandidate.StartsWith(normalizedRoot + Path.DirectorySeparatorChar, comparison);
     }
 }

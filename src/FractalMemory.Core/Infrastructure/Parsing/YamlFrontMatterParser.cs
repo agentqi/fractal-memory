@@ -136,6 +136,11 @@ public sealed class YamlFrontMatterParser : IFrontMatterParser
         return value;
     }
 
+    private static readonly HashSet<string> YamlReservedLiterals = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "true", "false", "null", "yes", "no", "on", "off", "y", "n", "~",
+    };
+
     private static bool NeedsQuoting(string value, bool includeFlowReservedChars)
     {
         if (string.IsNullOrEmpty(value))
@@ -149,6 +154,16 @@ public sealed class YamlFrontMatterParser : IFrontMatterParser
         }
 
         if (value.IndexOfAny(['\r', '\n']) >= 0)
+        {
+            return true;
+        }
+
+        if (YamlReservedLiterals.Contains(value))
+        {
+            return true;
+        }
+
+        if (LooksLikeYamlNumber(value))
         {
             return true;
         }
@@ -193,6 +208,10 @@ public sealed class YamlFrontMatterParser : IFrontMatterParser
 
         return false;
     }
+
+    private static bool LooksLikeYamlNumber(string value) =>
+        long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out _) ||
+        double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out _);
 
     private static string Quote(string value) =>
         $"\"{value.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal)}\"";
