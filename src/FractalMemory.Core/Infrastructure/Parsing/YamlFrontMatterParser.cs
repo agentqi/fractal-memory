@@ -58,17 +58,17 @@ public sealed class YamlFrontMatterParser : IFrontMatterParser
         builder.AppendLine("---");
         if (!string.IsNullOrWhiteSpace(metadata.Title))
         {
-            builder.AppendLine($"title: {Escape(metadata.Title)}");
+            builder.AppendLine($"title: {EscapeScalar(metadata.Title)}");
         }
 
         if (metadata.Aliases.Count > 0)
         {
-            builder.AppendLine($"aliases: [{string.Join(", ", metadata.Aliases.Select(Escape))}]");
+            builder.AppendLine($"aliases: [{string.Join(", ", metadata.Aliases.Select(EscapeFlowItem))}]");
         }
 
         if (metadata.Tags.Count > 0)
         {
-            builder.AppendLine($"tags: [{string.Join(", ", metadata.Tags.Select(Escape))}]");
+            builder.AppendLine($"tags: [{string.Join(", ", metadata.Tags.Select(EscapeFlowItem))}]");
         }
 
         builder.AppendLine($"status: {metadata.Status.ToString().ToLowerInvariant()}");
@@ -80,12 +80,12 @@ public sealed class YamlFrontMatterParser : IFrontMatterParser
 
         if (!string.IsNullOrWhiteSpace(metadata.Owner))
         {
-            builder.AppendLine($"owner: {Escape(metadata.Owner)}");
+            builder.AppendLine($"owner: {EscapeScalar(metadata.Owner)}");
         }
 
         if (!string.IsNullOrWhiteSpace(metadata.Summary))
         {
-            builder.AppendLine($"summary: {Escape(metadata.Summary)}");
+            builder.AppendLine($"summary: {EscapeScalar(metadata.Summary)}");
         }
 
         builder.AppendLine("---");
@@ -116,10 +116,105 @@ public sealed class YamlFrontMatterParser : IFrontMatterParser
         };
     }
 
-    private static string Escape(string value) =>
-        value.Contains(':', StringComparison.Ordinal) || value.Contains('[', StringComparison.Ordinal)
-            ? $"\"{value.Replace("\"", "\\\"", StringComparison.Ordinal)}\""
-            : value;
+    private static string EscapeScalar(string value)
+    {
+        if (NeedsQuoting(value, includeFlowReservedChars: false))
+        {
+            return Quote(value);
+        }
+
+        return value;
+    }
+
+    private static string EscapeFlowItem(string value)
+    {
+        if (NeedsQuoting(value, includeFlowReservedChars: true))
+        {
+            return Quote(value);
+        }
+
+        return value;
+    }
+
+    private static readonly HashSet<string> YamlReservedLiterals = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "true", "false", "null", "yes", "no", "on", "off", "y", "n", "~",
+    };
+
+    private static bool NeedsQuoting(string value, bool includeFlowReservedChars)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return true;
+        }
+
+        if (value != value.Trim())
+        {
+            return true;
+        }
+
+        if (value.IndexOfAny(['\r', '\n']) >= 0)
+        {
+            return true;
+        }
+
+        if (YamlReservedLiterals.Contains(value))
+        {
+            return true;
+        }
+
+        if (LooksLikeYamlNumber(value))
+        {
+            return true;
+        }
+
+        foreach (var ch in value)
+        {
+            switch (ch)
+            {
+                case ':':
+                case '#':
+                case '"':
+                case '\'':
+                case '\\':
+                case '&':
+                case '*':
+                case '!':
+                case '|':
+                case '>':
+                case '%':
+                case '@':
+                case '`':
+                    return true;
+                case '[':
+                case ']':
+                case '{':
+                case '}':
+                case ',':
+                    if (includeFlowReservedChars)
+                    {
+                        return true;
+                    }
+
+                    break;
+            }
+        }
+
+        var first = value[0];
+        if (first is '-' or '?' or ':' or '[' or ']' or '{' or '}' or '#' or '&' or '*' or '!' or '|' or '>' or '%' or '@' or '`' or '"' or '\'')
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool LooksLikeYamlNumber(string value) =>
+        long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out _) ||
+        double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out _);
+
+    private static string Quote(string value) =>
+        $"\"{value.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal)}\"";
 
     private static string? GetString(IReadOnlyDictionary<object, object?> source, string key) =>
         source.TryGetValue(key, out var value) ? value?.ToString() : null;

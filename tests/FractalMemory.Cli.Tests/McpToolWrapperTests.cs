@@ -9,7 +9,7 @@ namespace FractalMemory.Cli.Tests;
 public sealed class McpToolWrapperTests
 {
     [Fact]
-    public async Task MemorySearchToolDelegatesToSearchServiceAndAppliesLimit()
+    public async Task MemorySearchToolForwardsLimitAndScopeToService()
     {
         var expected = new[]
         {
@@ -44,19 +44,27 @@ public sealed class McpToolWrapperTests
             new StubValidationService(),
             context);
 
-        var response = await tools.MemorySearch("alpha", 1, CancellationToken.None);
+        var response = await tools.MemorySearch("alpha", limit: 1, scope: "projects/", cancellationToken: CancellationToken.None);
 
-        Assert.Single(response.Results);
-        Assert.Equal("projects/alpha", response.Results[0].RelativePath);
         Assert.Equal("/repo-root", searchService.LastWorkingDirectory);
+        Assert.Equal(1, searchService.LastLimit);
+        Assert.Equal("projects/", searchService.LastScope);
+        Assert.Equal(2, response.Results.Count);
     }
 
     private sealed class StubSearchService(IReadOnlyList<SearchResult> results) : ISearchService
     {
         public string? LastWorkingDirectory { get; private set; }
+        public int? LastLimit { get; private set; }
 
-        public Task<IReadOnlyList<SearchResult>> SearchAsync(string workingDirectory, string query, CancellationToken cancellationToken) =>
-            Task.FromResult(Track(workingDirectory, results));
+        public string? LastScope { get; private set; }
+
+        public Task<IReadOnlyList<SearchResult>> SearchAsync(string workingDirectory, string query, CancellationToken cancellationToken, int? limit = null, string? scope = null)
+        {
+            LastLimit = limit;
+            LastScope = scope;
+            return Task.FromResult(Track(workingDirectory, results));
+        }
 
         public Task<IReadOnlyList<RecentItem>> GetRecentAsync(string workingDirectory, int limit, int days, string? scope, CancellationToken cancellationToken) =>
             Task.FromResult<IReadOnlyList<RecentItem>>([]);

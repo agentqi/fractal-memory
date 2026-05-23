@@ -21,6 +21,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IMarkdownFileService, MarkdownFileService>();
         services.AddSingleton<ITemplateService, TemplateService>();
         services.AddSingleton<IRepositoryService, RepositoryService>();
+        services.AddSingleton<INodeListingCacheReader, NodeListingCacheReader>();
         services.AddSingleton<INodeService, NodeService>();
         services.AddSingleton<IReadService, ReadService>();
         services.AddSingleton<IIndexService, IndexService>();
