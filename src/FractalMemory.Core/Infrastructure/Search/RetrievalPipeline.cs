@@ -27,7 +27,7 @@ internal sealed record SnippetCandidate(
     public int Score => Breakdown.Values.Sum();
 }
 
-internal static class RetrievalPipeline
+internal static partial class RetrievalPipeline
 {
     private static readonly HashSet<string> StopTerms = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -35,22 +35,58 @@ internal static class RetrievalPipeline
         "was", "were", "have", "has", "had", "into", "onto", "about", "them", "they", "then", "show", "only", "latest",
     };
 
-    private static readonly Regex HeadingRegex = new(@"^\s{0,3}#{1,6}\s+(.*)$", RegexOptions.Compiled);
-    private static readonly Regex DateRegex = new(
-        @"\b(?:\d{4}-\d{2}-\d{2}|\d{1,2}\s+(?:january|february|march|april|may|june|july|august|september|october|november|december)\s*,?\s*\d{4}|(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2},\s*\d{4})\b",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    [GeneratedRegex(@"^\s{0,3}#{1,6}\s+(.*)$")]
+    private static partial Regex HeadingRegex();
+
+    [GeneratedRegex(
+        @"\b(?:" +
+            @"\d{4}-\d{1,2}-\d{1,2}" +
+            @"|\d{4}/\d{1,2}/\d{1,2}" +
+            @"|\d{1,2}/\d{1,2}/\d{2,4}" +
+            @"|\d{1,2}-\d{1,2}-\d{2,4}" +
+            @"|\d{1,2}\s+(?:january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)\s*,?\s*\d{2,4}" +
+            @"|(?:january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)\s+\d{1,2}\s*,?\s*\d{2,4}" +
+        @")\b",
+        RegexOptions.IgnoreCase)]
+    private static partial Regex DateRegex();
+
+    [GeneratedRegex(@"[^a-z0-9/\-\s]")]
+    private static partial Regex NonAlphaRegex();
+
+    private static readonly string[] TemporalQueryMarkers =
+    {
+        "when",
+        "what date",
+        "what time",
+        "by when",
+        "how long ago",
+        "which day",
+        "which week",
+        "which month",
+        "earliest",
+        "latest",
+        "most recent",
+        "before",
+        "after",
+        "since",
+        "until",
+    };
 
     public static RetrievalQueryProfile BuildQueryProfile(string query)
     {
         var lowered = query.Trim().ToLowerInvariant();
         var rawTerms = Normalize(query).Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        var terms = rawTerms.Where(term => term.Length > 2 && !StopTerms.Contains(term)).Distinct(StringComparer.Ordinal).ToArray();
-        var phrases = BuildPhrases(rawTerms);
+        var contentTerms = rawTerms.Where(IsContentTerm).ToArray();
+        var terms = contentTerms.Distinct(StringComparer.Ordinal).ToArray();
+        var phrases = BuildPhrases(contentTerms);
         var pathSegments = lowered.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         var dates = ExtractDates(query);
-        var asksWhen = lowered.Contains("when", StringComparison.Ordinal) || lowered.Contains("what date", StringComparison.Ordinal);
+        var asksWhen = TemporalQueryMarkers.Any(marker => lowered.Contains(marker, StringComparison.Ordinal));
         return new RetrievalQueryProfile(query, lowered, terms, phrases, pathSegments, dates, asksWhen);
     }
+
+    private static bool IsContentTerm(string term) =>
+        term.Length > 2 && !StopTerms.Contains(term);
 
     public static IReadOnlyList<MarkdownSection> ParseSections(string markdown)
     {
@@ -64,7 +100,7 @@ internal static class RetrievalPipeline
         for (var index = 0; index < lines.Length; index++)
         {
             var line = lines[index];
-            var match = HeadingRegex.Match(line);
+            var match = HeadingRegex().Match(line);
             if (match.Success)
             {
                 if (buffer.Count > 0)
@@ -268,20 +304,6 @@ internal static class RetrievalPipeline
             breakdown["path_prior"] = 80;
         }
 
-        var filePrior = Path.GetFileNameWithoutExtension(fileName) switch
-        {
-            "state" => 160,
-            "decisions" => 140,
-            "index" => 110,
-            "timeline" => 70,
-            _ when fileName.StartsWith("artifacts/", StringComparison.Ordinal) => 40,
-            _ => 0,
-        };
-        if (filePrior > 0)
-        {
-            breakdown["file_type_prior"] = filePrior;
-        }
-
         var snippetDates = ExtractDates(snippet);
         if (profile.Dates.Count > 0 && profile.Dates.Intersect(snippetDates).Any())
         {
@@ -290,6 +312,28 @@ internal static class RetrievalPipeline
         else if (profile.AsksWhen && snippetDates.Count > 0)
         {
             breakdown["normalized_date_match"] = 150;
+        }
+
+        var hasContentSignal =
+            entityOverlap > 0 ||
+            phraseMatches > 0 ||
+            breakdown.ContainsKey("exact_date_match") ||
+            breakdown.ContainsKey("normalized_date_match");
+
+        var filePrior = hasContentSignal
+            ? Path.GetFileNameWithoutExtension(fileName) switch
+            {
+                "state" => 160,
+                "decisions" => 140,
+                "index" => 110,
+                "timeline" => 70,
+                _ when fileName.StartsWith("artifacts/", StringComparison.Ordinal) => 40,
+                _ => 0,
+            }
+            : 0;
+        if (filePrior > 0)
+        {
+            breakdown["file_type_prior"] = filePrior;
         }
 
         if (profile.AsksWhen && snippetDates.Count > 0 && phraseMatches > 0)
@@ -302,11 +346,11 @@ internal static class RetrievalPipeline
             breakdown["temporal_near_miss_penalty"] = -120;
         }
 
-        if (profile.Phrases.Any(phrase => phrase.Contains("support group", StringComparison.Ordinal)) &&
-            !snippetNormalized.Contains("support group", StringComparison.Ordinal) &&
-            snippetNormalized.Contains("lgbtq", StringComparison.Ordinal))
+        if (profile.Phrases.Count > 0 &&
+            phraseMatches == 0 &&
+            entityOverlap > 0)
         {
-            breakdown["broad_thematic_penalty"] = -100;
+            breakdown["thematic_only_penalty"] = -60;
         }
 
         if (section.Heading.Contains("timeline", StringComparison.OrdinalIgnoreCase) && profile.AsksWhen)
@@ -337,7 +381,7 @@ internal static class RetrievalPipeline
             }
         }
 
-        if (profile.AsksWhen && DateRegex.IsMatch(line))
+        if (profile.AsksWhen && DateRegex().IsMatch(line))
         {
             score += 60;
         }
@@ -350,23 +394,16 @@ internal static class RetrievalPipeline
         return score;
     }
 
-    private static IReadOnlyList<string> BuildPhrases(IReadOnlyList<string> rawTerms)
+    private static IReadOnlyList<string> BuildPhrases(IReadOnlyList<string> contentTerms)
     {
         var phrases = new List<string>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
         for (var size = 3; size >= 2; size--)
         {
-            for (var index = 0; index <= rawTerms.Count - size; index++)
+            for (var index = 0; index <= contentTerms.Count - size; index++)
             {
-                var chunk = rawTerms.Skip(index).Take(size)
-                    .Where(term => term.Length > 2 && !StopTerms.Contains(term))
-                    .ToArray();
-                if (chunk.Length < 2)
-                {
-                    continue;
-                }
-
-                var phrase = string.Join(' ', chunk);
-                if (!phrases.Contains(phrase, StringComparer.Ordinal))
+                var phrase = string.Join(' ', contentTerms.Skip(index).Take(size));
+                if (seen.Add(phrase))
                 {
                     phrases.Add(phrase);
                 }
@@ -376,10 +413,12 @@ internal static class RetrievalPipeline
         return phrases;
     }
 
+    internal static IReadOnlyList<DateOnly> ExtractDatesForHighlight(string text) => ExtractDates(text);
+
     private static IReadOnlyList<DateOnly> ExtractDates(string text)
     {
         var dates = new List<DateOnly>();
-        foreach (Match match in DateRegex.Matches(text))
+        foreach (Match match in DateRegex().Matches(text))
         {
             if (DateTime.TryParse(match.Value, CultureInfo.InvariantCulture, DateTimeStyles.AllowWhiteSpaces, out var parsed))
             {
@@ -391,7 +430,7 @@ internal static class RetrievalPipeline
     }
 
     private static string Normalize(string text) =>
-        Regex.Replace(text.ToLowerInvariant(), @"[^a-z0-9/\-\s]", " ").Trim();
+        NonAlphaRegex().Replace(text.ToLowerInvariant(), " ").Trim();
 
     private static string NormalizeLineEndings(string markdown) =>
         markdown.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');

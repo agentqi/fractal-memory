@@ -1,6 +1,7 @@
 using System.Text.Json;
 using FractalMemory.Core.Application.Services;
 using FractalMemory.Core.Domain.Enums;
+using FractalMemory.Core.Domain.Models;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace FractalMemory.Core.Tests;
@@ -311,6 +312,318 @@ public sealed class RetrievalAndSchemaTests
         Assert.Contains("finishing the retrieval sprint", legacy.CurrentObjective, StringComparison.OrdinalIgnoreCase);
         Assert.Contains(legacy.ActiveConstraints, item => item.Contains("deterministic", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(legacy.OpenQuestions, item => item.Contains("cache first", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task SearchHonorsExplicitLimitAboveDiagnosticTopK()
+    {
+        using var provider = TestEnvironment.CreateServices();
+        var repositoryService = provider.GetRequiredService<IRepositoryService>();
+        var nodeService = provider.GetRequiredService<INodeService>();
+        var searchService = provider.GetRequiredService<ISearchService>();
+        var temp = TestEnvironment.CreateTempDirectory();
+
+        await repositoryService.InitializeAsync(temp, CancellationToken.None);
+        for (var i = 0; i < 15; i++)
+        {
+            await nodeService.CreateNodeAsync(temp, $"projects/limit-{i:00}", CancellationToken.None);
+            await File.WriteAllTextAsync(
+                Path.Combine(temp, ".fractal-memory", "projects", $"limit-{i:00}", "state.md"),
+                $"""
+                ---
+                title: Limit Node {i:00}
+                ---
+
+                ## Current Objective
+
+                Investigate retrieval limit propagation node {i:00}.
+                """);
+        }
+
+        var defaultResults = await searchService.SearchAsync(temp, "retrieval limit propagation", CancellationToken.None);
+        var expandedResults = await searchService.SearchAsync(temp, "retrieval limit propagation", CancellationToken.None, limit: 15);
+
+        Assert.True(defaultResults.Count <= 10);
+        Assert.True(expandedResults.Count > defaultResults.Count);
+    }
+
+    [Fact]
+    public async Task ThematicOverlapWithoutPhraseMatchIsPenalized()
+    {
+        using var provider = TestEnvironment.CreateServices();
+        var repositoryService = provider.GetRequiredService<IRepositoryService>();
+        var nodeService = provider.GetRequiredService<INodeService>();
+        var searchService = provider.GetRequiredService<ISearchService>();
+        var temp = TestEnvironment.CreateTempDirectory();
+
+        await repositoryService.InitializeAsync(temp, CancellationToken.None);
+        await nodeService.CreateNodeAsync(temp, "projects/exact-phrase", CancellationToken.None);
+        await nodeService.CreateNodeAsync(temp, "projects/topic-only", CancellationToken.None);
+
+        await File.WriteAllTextAsync(Path.Combine(temp, ".fractal-memory", "projects", "exact-phrase", "state.md"), """
+            ---
+            title: Exact Phrase
+            ---
+
+            ## Current Objective
+
+            Document the deployment rollback procedure for the staging tier.
+            """);
+        await File.WriteAllTextAsync(Path.Combine(temp, ".fractal-memory", "projects", "topic-only", "state.md"), """
+            ---
+            title: Topic Only
+            ---
+
+            ## Current Objective
+
+            Track tier deployment metrics and rollback failure rates separately.
+            """);
+
+        var results = await searchService.SearchAsync(temp, "deployment rollback procedure", CancellationToken.None);
+
+        Assert.NotEmpty(results);
+        Assert.Equal("projects/exact-phrase", results[0].RelativePath);
+        Assert.DoesNotContain("broad_thematic_penalty", results[0].ScoreBreakdown.Keys, StringComparer.Ordinal);
+    }
+
+    [Fact]
+    public async Task NodeListingCacheInvalidatesWhenStateFileChanges()
+    {
+        using var provider = TestEnvironment.CreateServices();
+        var repositoryService = provider.GetRequiredService<IRepositoryService>();
+        var nodeService = provider.GetRequiredService<INodeService>();
+        var searchService = provider.GetRequiredService<ISearchService>();
+        var temp = TestEnvironment.CreateTempDirectory();
+
+        await repositoryService.InitializeAsync(temp, CancellationToken.None);
+        await nodeService.CreateNodeAsync(temp, "projects/cache-invalidation", CancellationToken.None);
+        var statePath = Path.Combine(temp, ".fractal-memory", "projects", "cache-invalidation", "state.md");
+        await File.WriteAllTextAsync(statePath, """
+            ---
+            title: Cache Invalidation
+            ---
+
+            Initial waypoint marker before the update happens.
+            """);
+
+        var beforeUpdate = await searchService.SearchAsync(temp, "initial waypoint marker", CancellationToken.None);
+        Assert.NotEmpty(beforeUpdate);
+
+        await Task.Delay(1100);
+        await File.WriteAllTextAsync(statePath, """
+            ---
+            title: Cache Invalidation
+            ---
+
+            Subsequent breadcrumb signal after the cache should have flushed.
+            """);
+
+        var afterStaleQuery = await searchService.SearchAsync(temp, "initial waypoint marker", CancellationToken.None);
+        var afterFreshQuery = await searchService.SearchAsync(temp, "subsequent breadcrumb signal", CancellationToken.None);
+
+        Assert.Empty(afterStaleQuery);
+        Assert.NotEmpty(afterFreshQuery);
+    }
+
+    [Fact]
+    public async Task RecentScopeRequiresPathBoundary()
+    {
+        using var provider = TestEnvironment.CreateServices();
+        var repositoryService = provider.GetRequiredService<IRepositoryService>();
+        var nodeService = provider.GetRequiredService<INodeService>();
+        var searchService = provider.GetRequiredService<ISearchService>();
+        var temp = TestEnvironment.CreateTempDirectory();
+
+        await repositoryService.InitializeAsync(temp, CancellationToken.None);
+        await nodeService.CreateNodeAsync(temp, "projects/alpha", CancellationToken.None);
+        await nodeService.CreateNodeAsync(temp, "projects-archive/beta", CancellationToken.None);
+
+        var scoped = await searchService.GetRecentAsync(temp, 50, 30, "projects", CancellationToken.None);
+        var withSlash = await searchService.GetRecentAsync(temp, 50, 30, "projects/", CancellationToken.None);
+
+        Assert.All(scoped, item => Assert.StartsWith("projects/", item.RelativePath, StringComparison.Ordinal));
+        Assert.All(withSlash, item => Assert.StartsWith("projects/", item.RelativePath, StringComparison.Ordinal));
+        Assert.DoesNotContain(scoped, item => item.RelativePath.StartsWith("projects-archive/", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task TemporalMarkersBeyondWhenAlsoBoostDatedSnippets()
+    {
+        using var provider = TestEnvironment.CreateServices();
+        var repositoryService = provider.GetRequiredService<IRepositoryService>();
+        var nodeService = provider.GetRequiredService<INodeService>();
+        var searchService = provider.GetRequiredService<ISearchService>();
+        var temp = TestEnvironment.CreateTempDirectory();
+
+        await repositoryService.InitializeAsync(temp, CancellationToken.None);
+        await nodeService.CreateNodeAsync(temp, "research/release", CancellationToken.None);
+        await File.WriteAllTextAsync(Path.Combine(temp, ".fractal-memory", "research", "release", "state.md"), """
+            ---
+            title: Release Window
+            ---
+
+            ## Current Objective
+
+            Lock the release window for the rollout milestone.
+
+            ## Notes
+
+            - The latest release rollout milestone shipped on 2026-04-12.
+            - Earlier milestones did not include the audit log.
+            """);
+
+        var results = await searchService.SearchAsync(temp, "latest release rollout milestone", CancellationToken.None);
+
+        Assert.NotEmpty(results);
+        Assert.Contains(results[0].ScoreBreakdown.Keys, key =>
+            key == "normalized_date_match" || key == "exact_date_match");
+    }
+
+    [Fact]
+    public async Task SearchHonorsScopeFilter()
+    {
+        using var provider = TestEnvironment.CreateServices();
+        var repositoryService = provider.GetRequiredService<IRepositoryService>();
+        var nodeService = provider.GetRequiredService<INodeService>();
+        var searchService = provider.GetRequiredService<ISearchService>();
+        var temp = TestEnvironment.CreateTempDirectory();
+
+        await repositoryService.InitializeAsync(temp, CancellationToken.None);
+        await nodeService.CreateNodeAsync(temp, "projects/in-scope", CancellationToken.None);
+        await nodeService.CreateNodeAsync(temp, "research/out-of-scope", CancellationToken.None);
+        await File.WriteAllTextAsync(Path.Combine(temp, ".fractal-memory", "projects", "in-scope", "state.md"), """
+            ---
+            title: In Scope
+            ---
+
+            ## Current Objective
+
+            Find the deployment automation guardrail document.
+            """);
+        await File.WriteAllTextAsync(Path.Combine(temp, ".fractal-memory", "research", "out-of-scope", "state.md"), """
+            ---
+            title: Out Of Scope
+            ---
+
+            ## Current Objective
+
+            Investigate the same deployment automation guardrail topic.
+            """);
+
+        var scoped = await searchService.SearchAsync(temp, "deployment automation guardrail", CancellationToken.None, scope: "projects/");
+        var unscoped = await searchService.SearchAsync(temp, "deployment automation guardrail", CancellationToken.None);
+
+        Assert.All(scoped, item => Assert.StartsWith("projects/", item.RelativePath, StringComparison.Ordinal));
+        Assert.True(unscoped.Count > scoped.Count);
+    }
+
+    [Fact]
+    public async Task SearchTieBreakPrefersStateOverDecisions()
+    {
+        using var provider = TestEnvironment.CreateServices();
+        var repositoryService = provider.GetRequiredService<IRepositoryService>();
+        var nodeService = provider.GetRequiredService<INodeService>();
+        var searchService = provider.GetRequiredService<ISearchService>();
+        var temp = TestEnvironment.CreateTempDirectory();
+
+        await repositoryService.InitializeAsync(temp, CancellationToken.None);
+        await nodeService.CreateNodeAsync(temp, "projects/tie-break", CancellationToken.None);
+        var nodeRoot = Path.Combine(temp, ".fractal-memory", "projects", "tie-break");
+
+        const string sharedSnippet = "## Notes\n\nCanonical phrase tie break marker line for the test.\n";
+        await File.WriteAllTextAsync(Path.Combine(nodeRoot, "state.md"), $"""
+            ---
+            title: Tie Break State
+            ---
+
+            {sharedSnippet}
+            """);
+        await File.WriteAllTextAsync(Path.Combine(nodeRoot, "decisions.md"), $"""
+            ---
+            title: Tie Break Decisions
+            ---
+
+            {sharedSnippet}
+            """);
+
+        var results = await searchService.SearchAsync(temp, "canonical phrase tie break marker", CancellationToken.None);
+
+        Assert.NotEmpty(results);
+        Assert.Equal("state.md", results[0].MatchedFile);
+    }
+
+    [Fact]
+    public async Task NumericDateFormatsAreRecognized()
+    {
+        using var provider = TestEnvironment.CreateServices();
+        var repositoryService = provider.GetRequiredService<IRepositoryService>();
+        var nodeService = provider.GetRequiredService<INodeService>();
+        var searchService = provider.GetRequiredService<ISearchService>();
+        var temp = TestEnvironment.CreateTempDirectory();
+
+        await repositoryService.InitializeAsync(temp, CancellationToken.None);
+        await nodeService.CreateNodeAsync(temp, "research/numeric-date", CancellationToken.None);
+        await File.WriteAllTextAsync(Path.Combine(temp, ".fractal-memory", "research", "numeric-date", "state.md"), """
+            ---
+            title: Numeric Date
+            ---
+
+            ## Current Objective
+
+            Catalog the rollout milestone schedule.
+
+            ## Notes
+
+            - The rollout milestone shipped on 2026/04/12.
+            """);
+
+        var results = await searchService.SearchAsync(temp, "when did the rollout milestone ship", CancellationToken.None);
+
+        Assert.NotEmpty(results);
+        Assert.Contains(results[0].ScoreBreakdown.Keys, key =>
+            key == "normalized_date_match" || key == "exact_date_match");
+    }
+
+    [Fact]
+    public async Task OnDiskCacheServesColdReads()
+    {
+        var workingDirectory = TestEnvironment.CreateTempDirectory();
+
+        using (var primingProvider = TestEnvironment.CreateServices())
+        {
+            var repositoryService = primingProvider.GetRequiredService<IRepositoryService>();
+            var nodeService = primingProvider.GetRequiredService<INodeService>();
+            var indexService = primingProvider.GetRequiredService<IIndexService>();
+
+            await repositoryService.InitializeAsync(workingDirectory, CancellationToken.None);
+            await nodeService.CreateNodeAsync(workingDirectory, "projects/cold-start", CancellationToken.None);
+            await indexService.RefreshAsync(workingDirectory, CancellationToken.None);
+        }
+
+        using var coldProvider = TestEnvironment.CreateServices();
+        var coldSearchService = coldProvider.GetRequiredService<ISearchService>();
+        var coldResults = await coldSearchService.SearchAsync(workingDirectory, "projects/cold-start", CancellationToken.None);
+
+        Assert.NotEmpty(coldResults);
+        Assert.Equal("projects/cold-start", coldResults[0].RelativePath);
+    }
+
+    [Fact]
+    public void YamlFrontMatterRenderQuotesAliasesContainingSpecialChars()
+    {
+        var metadata = new NodeMetadata
+        {
+            Title = "Title: with colon",
+            Aliases = ["alpha, beta", "gamma", "with \"quote"],
+            Summary = "Summary with ] bracket and # hash.",
+        };
+
+        var rendered = FractalMemory.Core.Infrastructure.Parsing.YamlFrontMatterParser.Render(metadata);
+        var parsed = new FractalMemory.Core.Infrastructure.Parsing.YamlFrontMatterParser().Parse(rendered + "\n\nBody.");
+
+        Assert.Equal(metadata.Title, parsed.Metadata.Title);
+        Assert.Equal(metadata.Summary, parsed.Metadata.Summary);
+        Assert.Equal(metadata.Aliases.OrderBy(a => a, StringComparer.Ordinal), parsed.Metadata.Aliases.OrderBy(a => a, StringComparer.Ordinal));
     }
 
     [Fact]

@@ -31,10 +31,11 @@ public sealed class MemoryTools(
     public async Task<SearchResultsResponse> MemorySearch(
         [Description("Search query text.")] string query,
         [Description("Maximum number of results to return.")] int limit = 10,
+        [Description("Optional repository-relative scope prefix, for example projects/.")] string? scope = null,
         CancellationToken cancellationToken = default)
     {
-        var results = await searchService.SearchAsync(repositoryContext.GetServiceWorkingDirectory(), query, cancellationToken);
-        return new SearchResultsResponse(results.Take(limit).ToArray());
+        var results = await searchService.SearchAsync(repositoryContext.GetServiceWorkingDirectory(), query, cancellationToken, limit, scope);
+        return new SearchResultsResponse(results);
     }
 
     [McpServerTool(Name = "memory_recent", Title = "Recent Memory Activity", ReadOnly = true, Idempotent = true)]

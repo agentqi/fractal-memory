@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -5,6 +6,7 @@ using FractalMemory.Core.Application.Services;
 using FractalMemory.Core.Domain.Enums;
 using FractalMemory.Core.Domain.Models;
 using FractalMemory.Core.Domain.Rules;
+using FractalMemory.Core.Infrastructure.Indexing;
 using FractalMemory.Core.Infrastructure.Parsing;
 using YamlDotNet.Serialization;
 
@@ -14,6 +16,8 @@ public sealed class RepositoryService(
     IFileSystemService fileSystemService,
     ITemplateService templateService) : IRepositoryService
 {
+    private static readonly IDeserializer ConfigDeserializer = new DeserializerBuilder().Build();
+
     public async Task<string> InitializeAsync(string workingDirectory, CancellationToken cancellationToken)
     {
         var existing = FindRepositoryRoot(workingDirectory);
@@ -106,8 +110,7 @@ public sealed class RepositoryService(
     {
         var configPath = Path.Combine(GetStorageRoot(repositoryRoot), "config.yaml");
         var yaml = await fileSystemService.ReadAllTextAsync(configPath, cancellationToken);
-        var deserializer = new DeserializerBuilder().Build();
-        var data = deserializer.Deserialize<Dictionary<object, object?>>(yaml) ?? [];
+        var data = ConfigDeserializer.Deserialize<Dictionary<object, object?>>(yaml) ?? [];
 
         return new RepositoryConfig
         {
@@ -161,9 +164,14 @@ public sealed class NodeService(
     IRepositoryService repositoryService,
     IFileSystemService fileSystemService,
     IMarkdownFileService markdownFileService,
-    ITemplateService templateService) : INodeService
+    ITemplateService templateService,
+    INodeListingCacheReader cacheReader) : INodeService
 {
+    private readonly ConcurrentDictionary<string, NodeListingCacheEntry> _nodeListingCache = new(StringComparer.Ordinal);
+
     public string NormalizeNodePath(string inputPath) => NodePathRules.Normalize(inputPath);
+
+    private sealed record NodeListingCacheEntry(DateTimeOffset Fingerprint, IReadOnlyList<MemoryNode> Nodes);
 
     public async Task<MemoryNode> CreateNodeAsync(
         string workingDirectory,
@@ -206,6 +214,20 @@ public sealed class NodeService(
     public async Task<IReadOnlyList<MemoryNode>> GetAllNodesAsync(string repositoryRoot, CancellationToken cancellationToken)
     {
         var storageRoot = repositoryService.GetStorageRoot(repositoryRoot);
+        var fingerprint = ComputeNodeFingerprint(storageRoot);
+        var cacheKey = Path.GetFullPath(repositoryRoot);
+        if (_nodeListingCache.TryGetValue(cacheKey, out var cached) && cached.Fingerprint == fingerprint)
+        {
+            return cached.Nodes;
+        }
+
+        var fromDiskCache = await cacheReader.TryLoadAsync(repositoryRoot, fingerprint, cancellationToken);
+        if (fromDiskCache is not null)
+        {
+            _nodeListingCache[cacheKey] = new NodeListingCacheEntry(fingerprint, fromDiskCache);
+            return fromDiskCache;
+        }
+
         var directories = EnumerateNodeIndexFiles(storageRoot)
             .Select(Path.GetDirectoryName)
             .Where(path => !string.IsNullOrWhiteSpace(path))
@@ -223,7 +245,56 @@ public sealed class NodeService(
             nodes.Add(await LoadNodeAsync(repositoryRoot, relativePath, cancellationToken));
         }
 
-        return nodes.OrderBy(node => node.RelativePath, StringComparer.Ordinal).ToArray();
+        var ordered = nodes.OrderBy(node => node.RelativePath, StringComparer.Ordinal).ToArray();
+        _nodeListingCache[cacheKey] = new NodeListingCacheEntry(fingerprint, ordered);
+        return ordered;
+    }
+
+    private DateTimeOffset ComputeNodeFingerprint(string storageRoot) =>
+        ComputeNodeFingerprintForCache(fileSystemService, storageRoot);
+
+    internal static DateTimeOffset ComputeNodeFingerprintForCache(IFileSystemService fileSystem, string storageRoot)
+    {
+        var latest = DateTimeOffset.MinValue;
+        foreach (var file in EnumerateNodeFingerprintFilesStatic(fileSystem, storageRoot))
+        {
+            var mtime = fileSystem.GetLastWriteTimeUtc(file);
+            if (mtime > latest)
+            {
+                latest = mtime;
+            }
+        }
+
+        return latest;
+    }
+
+    private static IEnumerable<string> EnumerateNodeFingerprintFilesStatic(IFileSystemService fileSystem, string storageRoot)
+    {
+        foreach (var path in fileSystem.EnumerateFiles(storageRoot, "*", SearchOption.AllDirectories))
+        {
+            if (!IsContentExtension(path))
+            {
+                continue;
+            }
+
+            if (path.Contains($"{Path.DirectorySeparatorChar}templates{Path.DirectorySeparatorChar}", StringComparison.Ordinal) ||
+                path.Contains($"{Path.DirectorySeparatorChar}archive{Path.DirectorySeparatorChar}", StringComparison.Ordinal) ||
+                path.Contains($"{Path.DirectorySeparatorChar}handoffs{Path.DirectorySeparatorChar}", StringComparison.Ordinal) ||
+                path.Contains($"{Path.DirectorySeparatorChar}indexes{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            yield return path;
+        }
+    }
+
+    internal static bool IsContentExtension(string path)
+    {
+        var extension = Path.GetExtension(path);
+        return extension.Equals(".md", StringComparison.OrdinalIgnoreCase) ||
+            extension.Equals(".html", StringComparison.OrdinalIgnoreCase) ||
+            extension.Equals(".htm", StringComparison.OrdinalIgnoreCase);
     }
 
     public async Task<IReadOnlyList<MemoryNode>> GetChildNodesAsync(string repositoryRoot, MemoryNode node, CancellationToken cancellationToken)
@@ -255,12 +326,13 @@ public sealed class NodeService(
             throw new InvalidOperationException($"Node '{normalizedPath}' does not exist.");
         }
 
-        var indexPath = ResolveNodeFile(fullPath, "index")
+        var topLevel = SnapshotTopLevelFiles(fullPath);
+        var indexPath = ResolveFromSnapshot(topLevel, fullPath, "index")
             ?? throw new InvalidOperationException($"Node '{normalizedPath}' is missing index.md or index.html.");
-        var statePath = ResolveNodeFile(fullPath, "state")
+        var statePath = ResolveFromSnapshot(topLevel, fullPath, "state")
             ?? throw new InvalidOperationException($"Node '{normalizedPath}' is missing state.md or state.html.");
-        var timelinePath = ResolveNodeFile(fullPath, "timeline");
-        var decisionsPath = ResolveNodeFile(fullPath, "decisions");
+        var timelinePath = ResolveFromSnapshot(topLevel, fullPath, "timeline");
+        var decisionsPath = ResolveFromSnapshot(topLevel, fullPath, "decisions");
         var index = await ReadNodeDocumentAsync(indexPath, cancellationToken);
         var state = await ReadNodeDocumentAsync(statePath, cancellationToken);
         var timeline = timelinePath is not null
@@ -286,12 +358,46 @@ public sealed class NodeService(
         };
     }
 
-    private IEnumerable<string> EnumerateNodeIndexFiles(string storageRoot) =>
-        fileSystemService.EnumerateFiles(storageRoot, "index.md", SearchOption.AllDirectories)
-            .Concat(fileSystemService.EnumerateFiles(storageRoot, "index.html", SearchOption.AllDirectories))
-            .Concat(fileSystemService.EnumerateFiles(storageRoot, "index.htm", SearchOption.AllDirectories));
+    private IEnumerable<string> EnumerateNodeIndexFiles(string storageRoot)
+    {
+        foreach (var file in fileSystemService.EnumerateFiles(storageRoot, "*", SearchOption.AllDirectories))
+        {
+            var fileName = Path.GetFileName(file);
+            if (fileName.Equals("index.md", StringComparison.OrdinalIgnoreCase) ||
+                fileName.Equals("index.html", StringComparison.OrdinalIgnoreCase) ||
+                fileName.Equals("index.htm", StringComparison.OrdinalIgnoreCase))
+            {
+                yield return file;
+            }
+        }
+    }
 
     private bool HasNodeFile(string directory, string baseName) => ResolveNodeFile(directory, baseName) is not null;
+
+    private HashSet<string> SnapshotTopLevelFiles(string directory)
+    {
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var file in fileSystemService.EnumerateFiles(directory, "*", SearchOption.TopDirectoryOnly))
+        {
+            names.Add(Path.GetFileName(file));
+        }
+
+        return names;
+    }
+
+    private static string? ResolveFromSnapshot(HashSet<string> topLevel, string directory, string baseName)
+    {
+        foreach (var extension in new[] { ".md", ".html", ".htm" })
+        {
+            var fileName = baseName + extension;
+            if (topLevel.Contains(fileName))
+            {
+                return Path.Combine(directory, fileName);
+            }
+        }
+
+        return null;
+    }
 
     private string? ResolveNodeFile(string directory, string baseName)
     {
@@ -364,6 +470,11 @@ public sealed class ReadService(
             ?? ExtractSummary(node.StateContent)
             ?? "No summary available.";
 
+        var showIndex = depth >= RetrievalDepth.Orientation && view is NodeViewType.Index or NodeViewType.Children;
+        var showState = depth >= RetrievalDepth.Working || view == NodeViewType.State;
+        var showTimeline = depth >= RetrievalDepth.Deep || view == NodeViewType.Timeline;
+        var showDecisions = depth >= RetrievalDepth.Deep || view == NodeViewType.Decisions;
+
         return new OpenNodeResult
         {
             RelativePath = node.RelativePath,
@@ -371,20 +482,16 @@ public sealed class ReadService(
             Summary = summary,
             Depth = depth,
             View = view,
-            IndexSummary = depth >= RetrievalDepth.Orientation && view is NodeViewType.Index or NodeViewType.Children
+            IndexSummary = showIndex
                 ? TrimToParagraphs(node.IndexContent, depth == RetrievalDepth.Working ? 2 : 3)
                 : null,
-            CurrentState = depth >= RetrievalDepth.Working || view == NodeViewType.State
+            CurrentState = showState
                 ? TrimToParagraphs(node.StateContent, depth == RetrievalDepth.Deep ? 3 : 2)
                 : null,
             Children = children.Select(child => $"{child.RelativePath} - {child.Metadata.Summary ?? ExtractSummary(child.IndexContent) ?? child.Metadata.Title ?? Path.GetFileName(child.RelativePath)}").ToArray(),
             SuggestedReads = BuildSuggestedReads(node, children),
-            RecentTimeline = depth == RetrievalDepth.Deep || view == NodeViewType.Timeline
-                ? ExtractHighlights(node.TimelineContent, 3)
-                : [],
-            RecentDecisions = depth == RetrievalDepth.Deep || view == NodeViewType.Decisions
-                ? ExtractHighlights(node.DecisionsContent, 3)
-                : [],
+            RecentTimeline = showTimeline ? ExtractHighlights(node.TimelineContent, 3) : [],
+            RecentDecisions = showDecisions ? ExtractHighlights(node.DecisionsContent, 3) : [],
         };
     }
 
@@ -417,12 +524,45 @@ public sealed class ReadService(
         return string.Join(Environment.NewLine + Environment.NewLine, paragraphs.Take(maxParagraphs)).Trim();
     }
 
-    internal static IReadOnlyList<string> ExtractHighlights(string content, int maxItems) =>
-        content.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Select(line => line.Trim())
-            .Where(line => !line.StartsWith('#'))
-            .TakeLast(maxItems)
+    internal static IReadOnlyList<string> ExtractHighlights(string content, int maxItems)
+    {
+        var candidates = content.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select((line, index) => (Line: line.Trim(), Index: index))
+            .Where(item => !item.Line.StartsWith('#'))
             .ToArray();
+
+        if (candidates.Length == 0)
+        {
+            return [];
+        }
+
+        var dated = candidates
+            .Select(item => (item.Line, item.Index, Date: TryExtractFirstDate(item.Line)))
+            .Where(item => item.Date is not null)
+            .ToArray();
+
+        if (dated.Length >= maxItems)
+        {
+            return dated
+                .OrderByDescending(item => item.Date!.Value)
+                .ThenByDescending(item => item.Index)
+                .Take(maxItems)
+                .Select(item => item.Line)
+                .ToArray();
+        }
+
+        return candidates.TakeLast(maxItems).Select(item => item.Line).ToArray();
+    }
+
+    private static DateOnly? TryExtractFirstDate(string line)
+    {
+        foreach (var date in FractalMemory.Core.Infrastructure.Search.RetrievalPipeline.ExtractDatesForHighlight(line))
+        {
+            return date;
+        }
+
+        return null;
+    }
 }
 
 public sealed class ExportService(
@@ -485,8 +625,8 @@ public sealed class HandoffService(
         var repositoryRoot = repositoryService.FindRepositoryRoot(workingDirectory)
             ?? throw new InvalidOperationException("No FractalMemory repository found.");
         var config = await repositoryService.LoadConfigAsync(repositoryRoot, cancellationToken);
-        var node = await nodeService.GetNodeAsync(repositoryRoot, nodePath, cancellationToken);
-        var opened = await readService.OpenAsync(repositoryRoot, nodePath, RetrievalDepth.Deep, NodeViewType.Index, cancellationToken);
+        var node = await nodeService.GetNodeAsync(workingDirectory, nodePath, cancellationToken);
+        var opened = await readService.OpenAsync(workingDirectory, nodePath, RetrievalDepth.Deep, NodeViewType.Index, cancellationToken);
         var evidence = FractalMemory.Core.Infrastructure.Search.SearchService.BuildNodeEvidence(node, config.Retrieval.MaxSnippetLines);
         var answerContext = structuredMemoryService.BuildAnswerContext(
             node,
@@ -661,7 +801,12 @@ public sealed class ValidationService(
 
             if (config.Validation.RequireState && statePath is null)
             {
-                issues.Add(new ValidationIssue { Severity = ValidationSeverity.Error, RelativePath = relativePath, Message = "Missing required state.md or state.html." });
+                issues.Add(new ValidationIssue
+                {
+                    Severity = ValidationSeverity.Error,
+                    RelativePath = relativePath,
+                    Message = "Missing required state.md or state.html. Search and listings ignore index-only nodes until state is present.",
+                });
             }
 
             foreach (var memoryFile in new[] { indexPath, statePath, ResolveNodeFile(directory, "timeline"), ResolveNodeFile(directory, "decisions") })
@@ -759,10 +904,16 @@ public sealed class ValidationService(
         return new ValidationReport { Issues = issues.OrderByDescending(issue => issue.Severity).ThenBy(issue => issue.RelativePath, StringComparer.Ordinal).ToArray() };
     }
 
-    private IEnumerable<string> EnumerateMemoryFiles(string storageRoot) =>
-        fileSystemService.EnumerateFiles(storageRoot, "*.md", SearchOption.AllDirectories)
-            .Concat(fileSystemService.EnumerateFiles(storageRoot, "*.html", SearchOption.AllDirectories))
-            .Concat(fileSystemService.EnumerateFiles(storageRoot, "*.htm", SearchOption.AllDirectories));
+    private IEnumerable<string> EnumerateMemoryFiles(string storageRoot)
+    {
+        foreach (var path in fileSystemService.EnumerateFiles(storageRoot, "*", SearchOption.AllDirectories))
+        {
+            if (NodeService.IsContentExtension(path))
+            {
+                yield return path;
+            }
+        }
+    }
 
     private string? ResolveNodeFile(string directory, string baseName)
     {

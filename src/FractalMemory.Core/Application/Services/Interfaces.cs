@@ -36,7 +36,7 @@ public interface IReadService
 
 public interface ISearchService
 {
-    Task<IReadOnlyList<SearchResult>> SearchAsync(string workingDirectory, string query, CancellationToken cancellationToken);
+    Task<IReadOnlyList<SearchResult>> SearchAsync(string workingDirectory, string query, CancellationToken cancellationToken, int? limit = null, string? scope = null);
     Task<IReadOnlyList<RecentItem>> GetRecentAsync(
         string workingDirectory,
         int limit,

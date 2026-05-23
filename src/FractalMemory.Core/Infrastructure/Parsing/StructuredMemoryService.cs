@@ -4,8 +4,17 @@ using FractalMemory.Core.Domain.Models;
 
 namespace FractalMemory.Core.Infrastructure.Parsing;
 
-public sealed class StructuredMemoryService : IStructuredMemoryService
+public sealed partial class StructuredMemoryService : IStructuredMemoryService
 {
+    [GeneratedRegex(@"^\s{0,3}#{1,6}\s+(.*)$")]
+    private static partial Regex HeadingRegex();
+
+    [GeneratedRegex(@"[^a-z0-9/ ]")]
+    private static partial Regex NormalizeHeadingRegex();
+
+    [GeneratedRegex(@"\s+")]
+    private static partial Regex WhitespaceRegex();
+
     private static readonly Dictionary<string, string> HeadingMap = new(StringComparer.OrdinalIgnoreCase)
     {
         ["project / branch"] = "project_branch",
@@ -127,7 +136,7 @@ public sealed class StructuredMemoryService : IStructuredMemoryService
 
         foreach (var line in NormalizeLineEndings(markdown).Split('\n'))
         {
-            var headingMatch = Regex.Match(line, @"^\s{0,3}#{1,6}\s+(.*)$");
+            var headingMatch = HeadingRegex().Match(line);
             if (headingMatch.Success)
             {
                 FlushSection(sections, currentKey, currentLines);
@@ -168,8 +177,8 @@ public sealed class StructuredMemoryService : IStructuredMemoryService
 
     private static string NormalizeHeading(string heading)
     {
-        var normalized = Regex.Replace(heading.ToLowerInvariant(), @"[^a-z0-9/ ]", " ").Trim();
-        normalized = Regex.Replace(normalized, @"\s+", " ");
+        var normalized = NormalizeHeadingRegex().Replace(heading.ToLowerInvariant(), " ").Trim();
+        normalized = WhitespaceRegex().Replace(normalized, " ");
         return HeadingMap.TryGetValue(normalized, out var mapped) ? mapped : normalized;
     }
 

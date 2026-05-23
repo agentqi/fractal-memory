@@ -47,8 +47,13 @@ public sealed class OpenNodeUseCase(IReadService readService)
 
 public sealed class SearchUseCase(ISearchService searchService)
 {
-    public Task<IReadOnlyList<SearchResult>> ExecuteAsync(string workingDirectory, string query, CancellationToken cancellationToken) =>
-        searchService.SearchAsync(workingDirectory, query, cancellationToken);
+    public Task<IReadOnlyList<SearchResult>> ExecuteAsync(
+        string workingDirectory,
+        string query,
+        CancellationToken cancellationToken,
+        int? limit = null,
+        string? scope = null) =>
+        searchService.SearchAsync(workingDirectory, query, cancellationToken, limit, scope);
 }
 
 public sealed class ExportUseCase(IExportService exportService)

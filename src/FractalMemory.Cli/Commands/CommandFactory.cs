@@ -63,12 +63,21 @@ public static class CommandFactory
 
         var search = new Command("search", "Search memory.");
         var queryArgument = new Argument<string>("query");
+        var searchLimitOption = new Option<int?>("--limit");
+        var searchScopeOption = new Option<string?>("--scope");
         search.Arguments.Add(queryArgument);
+        search.Options.Add(searchLimitOption);
+        search.Options.Add(searchScopeOption);
         search.SetAction((parseResult, cancellationToken) => ExecuteAsync(async () =>
         {
             var useCase = provider.GetRequiredService<SearchUseCase>();
             var query = parseResult.GetRequiredValue(queryArgument);
-            var results = await useCase.ExecuteAsync(Environment.CurrentDirectory, query, cancellationToken);
+            var results = await useCase.ExecuteAsync(
+                Environment.CurrentDirectory,
+                query,
+                cancellationToken,
+                parseResult.GetValue(searchLimitOption),
+                parseResult.GetValue(searchScopeOption));
             Console.WriteLine(formatter.FormatSearch(results, query));
         }));
 
