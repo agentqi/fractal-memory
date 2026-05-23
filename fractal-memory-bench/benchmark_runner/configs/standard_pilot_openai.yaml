@@ -1,0 +1,33 @@
+custom_benchmark_enabled: false
+mode: retrieval_only
+approaches:
+  - fractal_cli
+repetitions: 1
+simulate_reset: false
+randomize_task_order: false
+output_directory: benchmark_runner/outputs
+corpus_directory: benchmark_runner/corpus
+tasks_directory: benchmark_runner/tasks
+fractal_cli_use_live_cli: true
+standard_benchmarks:
+  enabled: true
+  backend: memorybench
+  memorybench:
+    mode: subprocess
+    executable: ~/.bun/bin/bun
+    working_dir: ./vendor/memorybench
+    timeout_seconds: 3600
+    preserve_raw_outputs: true
+    skip_if_unavailable: false
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      FRACTALMEMORY_RETRIEVAL_TOP_K: "10"
+      FRACTALMEMORY_ANSWER_TOP_K: "3"
+      FRACTALMEMORY_ENABLE_RANKING_DEBUG: "true"
+      FRACTALMEMORY_RANKING_DEBUG_TOP_N: "5"
+    runs:
+      - benchmark: locomo
+        evaluator: gpt-4o
+        provider: fractalmemory
+        answering_model: gpt-4o-mini
+        limit: 1

@@ -1,0 +1,6 @@
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+benchmark_runner/outputs/*
+!benchmark_runner/outputs/.gitkeep

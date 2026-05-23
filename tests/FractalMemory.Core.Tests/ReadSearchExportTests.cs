@@ -1,0 +1,185 @@
+using FractalMemory.Core.Application.Services;
+using FractalMemory.Core.Domain.Enums;
+using Microsoft.Extensions.DependencyInjection;
+
+namespace FractalMemory.Core.Tests;
+
+public sealed class ReadSearchExportTests
+{
+    [Fact]
+    public async Task OpenRespectsDepthBehavior()
+    {
+        using var provider = TestEnvironment.CreateServices();
+        var repositoryService = provider.GetRequiredService<IRepositoryService>();
+        var nodeService = provider.GetRequiredService<INodeService>();
+        var readService = provider.GetRequiredService<IReadService>();
+        var temp = TestEnvironment.CreateTempDirectory();
+
+        await repositoryService.InitializeAsync(temp, CancellationToken.None);
+        await nodeService.CreateNodeAsync(temp, "projects/fractal-memory-cli", CancellationToken.None);
+        var nodeRoot = Path.Combine(temp, ".fractal-memory", "projects", "fractal-memory-cli");
+        await File.WriteAllTextAsync(Path.Combine(nodeRoot, "index.md"), """
+            ---
+            title: Fractal Memory CLI
+            summary: Build the structured memory CLI.
+            ---
+
+            # Fractal Memory CLI
+
+            Overview paragraph.
+            """);
+        await File.WriteAllTextAsync(Path.Combine(nodeRoot, "state.md"), """
+            ---
+            title: Fractal Memory CLI State
+            ---
+
+            Current work is implementing the MVP command set.
+            Open question? settle export defaults.
+            """);
+        await File.WriteAllTextAsync(Path.Combine(nodeRoot, "timeline.md"), """
+            ---
+            title: Timeline
+            ---
+
+            - 2026-04-01: Designed the repository layout.
+            - 2026-04-02: Implemented the command surface.
+            """);
+        await File.WriteAllTextAsync(Path.Combine(nodeRoot, "decisions.md"), """
+            ---
+            title: Decisions
+            ---
+
+            - Prefer filesystem truth over indexes.
+            """);
+
+        var orientation = await readService.OpenAsync(temp, "projects/fractal-memory-cli", RetrievalDepth.Orientation, NodeViewType.Index, CancellationToken.None);
+        var deep = await readService.OpenAsync(temp, "projects/fractal-memory-cli", RetrievalDepth.Deep, NodeViewType.Index, CancellationToken.None);
+
+        Assert.Null(orientation.CurrentState);
+        Assert.NotNull(deep.CurrentState);
+        Assert.NotEmpty(deep.RecentTimeline);
+        Assert.NotEmpty(deep.RecentDecisions);
+    }
+
+    [Fact]
+    public async Task SearchRanksExactPathAboveContent()
+    {
+        using var provider = TestEnvironment.CreateServices();
+        var repositoryService = provider.GetRequiredService<IRepositoryService>();
+        var nodeService = provider.GetRequiredService<INodeService>();
+        var searchService = provider.GetRequiredService<ISearchService>();
+        var temp = TestEnvironment.CreateTempDirectory();
+
+        await repositoryService.InitializeAsync(temp, CancellationToken.None);
+        await nodeService.CreateNodeAsync(temp, "projects/alpha", CancellationToken.None);
+        await nodeService.CreateNodeAsync(temp, "research/notes", CancellationToken.None);
+        await File.WriteAllTextAsync(Path.Combine(temp, ".fractal-memory", "research", "notes", "state.md"), """
+            ---
+            title: Notes
+            ---
+
+            projects/alpha is referenced in content only.
+            """);
+
+        var results = await searchService.SearchAsync(temp, "projects/alpha", CancellationToken.None);
+
+        Assert.NotEmpty(results);
+        Assert.Equal("projects/alpha", results[0].RelativePath);
+        Assert.Equal("path", results[0].MatchedFile);
+    }
+
+    [Fact]
+    public async Task OpenSplitsParagraphsAcrossCrLfContent()
+    {
+        using var provider = TestEnvironment.CreateServices();
+        var repositoryService = provider.GetRequiredService<IRepositoryService>();
+        var nodeService = provider.GetRequiredService<INodeService>();
+        var readService = provider.GetRequiredService<IReadService>();
+        var temp = TestEnvironment.CreateTempDirectory();
+
+        await repositoryService.InitializeAsync(temp, CancellationToken.None);
+        await nodeService.CreateNodeAsync(temp, "projects/crlf", CancellationToken.None);
+        var nodeRoot = Path.Combine(temp, ".fractal-memory", "projects", "crlf");
+        await File.WriteAllTextAsync(Path.Combine(nodeRoot, "state.md"), "---\r\ntitle: CRLF State\r\n---\r\n\r\nFirst paragraph.\r\n\r\nSecond paragraph.\r\n\r\nThird paragraph.\r\n");
+
+        var opened = await readService.OpenAsync(temp, "projects/crlf", RetrievalDepth.Working, NodeViewType.Index, CancellationToken.None);
+
+        Assert.NotNull(opened.CurrentState);
+        Assert.Contains("First paragraph.", opened.CurrentState, StringComparison.Ordinal);
+        Assert.Contains("Second paragraph.", opened.CurrentState, StringComparison.Ordinal);
+        Assert.DoesNotContain("Third paragraph.", opened.CurrentState, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RecentUsesInjectedClock()
+    {
+        using var provider = TestEnvironment.CreateServices(new DateTimeOffset(2100, 1, 1, 0, 0, 0, TimeSpan.Zero));
+        var repositoryService = provider.GetRequiredService<IRepositoryService>();
+        var nodeService = provider.GetRequiredService<INodeService>();
+        var searchService = provider.GetRequiredService<ISearchService>();
+        var temp = TestEnvironment.CreateTempDirectory();
+
+        await repositoryService.InitializeAsync(temp, CancellationToken.None);
+        await nodeService.CreateNodeAsync(temp, "projects/future-clock", CancellationToken.None);
+
+        var items = await searchService.GetRecentAsync(temp, 10, 30, null, CancellationToken.None);
+
+        Assert.Empty(items);
+    }
+
+    [Fact]
+    public async Task ExportAndHandoffProduceStructuredOutput()
+    {
+        using var provider = TestEnvironment.CreateServices();
+        var repositoryService = provider.GetRequiredService<IRepositoryService>();
+        var nodeService = provider.GetRequiredService<INodeService>();
+        var exportService = provider.GetRequiredService<IExportService>();
+        var handoffService = provider.GetRequiredService<IHandoffService>();
+        var aiFormatter = provider.GetRequiredService<IAiExportFormatter>();
+        var indexService = provider.GetRequiredService<IIndexService>();
+        var temp = TestEnvironment.CreateTempDirectory();
+
+        await repositoryService.InitializeAsync(temp, CancellationToken.None);
+        await nodeService.CreateNodeAsync(temp, "projects/fractal-memory-cli", CancellationToken.None);
+        var nodeRoot = Path.Combine(temp, ".fractal-memory", "projects", "fractal-memory-cli");
+        await File.WriteAllTextAsync(Path.Combine(nodeRoot, "index.md"), """
+            ---
+            title: Fractal Memory CLI
+            aliases: [fm]
+            tags: [cli, memory]
+            summary: Build the local-first structured memory CLI.
+            ---
+
+            Overview.
+            """);
+        await File.WriteAllTextAsync(Path.Combine(nodeRoot, "state.md"), """
+            ---
+            title: Current State
+            ---
+
+            Current goal is finishing the MVP.
+            What should verbose export include?
+            """);
+        await File.WriteAllTextAsync(Path.Combine(nodeRoot, "decisions.md"), """
+            ---
+            title: Decisions
+            ---
+
+            - Use markdown files as source of truth.
+            """);
+
+        await indexService.RefreshAsync(temp, CancellationToken.None);
+        var export = await exportService.ExportAsync(temp, "projects/fractal-memory-cli", ExportMode.Standard, CancellationToken.None);
+        var rendered = aiFormatter.Format(export);
+        var handoff = await handoffService.CreateAsync(temp, "projects/fractal-memory-cli", CancellationToken.None);
+
+        Assert.Contains("[memory:projects/fractal-memory-cli]", rendered, StringComparison.Ordinal);
+        Assert.Contains("decision_highlights:", rendered, StringComparison.Ordinal);
+        Assert.True(File.Exists(Path.Combine(temp, handoff.HandoffFilePath)));
+
+        var aliases = await File.ReadAllTextAsync(Path.Combine(temp, ".fractal-memory", "indexes", "aliases.yaml"));
+        var paths = await File.ReadAllTextAsync(Path.Combine(temp, ".fractal-memory", "indexes", "paths.yaml"));
+        Assert.Contains("fm", aliases, StringComparison.Ordinal);
+        Assert.Contains("projects/fractal-memory-cli", paths, StringComparison.Ordinal);
+    }
+}

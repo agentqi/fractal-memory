@@ -1,0 +1,32 @@
+id: A3
+category: resume-after-reset
+project: flowone
+prompt: "Resume the FlowOne frontend blocker and what we said to fix it."
+gold_standard:
+  - identifies FlowOne
+  - recovers frontend traceability blocker
+  - recalls feature-store decision
+must_recover:
+  - frontend traceability panel
+  - dedicated feature store
+  - lineage sidebar
+useful_to_recover:
+  - stale lineage state
+  - avoid unrelated project leakage
+distractors:
+  - GovOS endpoint modules
+  - Fractal benchmark harness
+success_criteria:
+  - propose repairing selectors
+expected_paths:
+  - projects/flowone
+answer_rubric:
+  expected_phrases:
+    - FlowOne
+    - dedicated feature store
+    - lineage sidebar
+  forbidden_phrases:
+    - GovOS endpoint modules
+    - Fractal benchmark harness
+  unsupported_claim_patterns:
+    - "already fixed.*"

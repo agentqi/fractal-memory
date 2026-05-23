@@ -1,0 +1,32 @@
+id: A4
+category: resume-after-reset
+project: fractal-memory-cli
+prompt: "Resume the benchmark design open questions for FractalMemoryBench."
+gold_standard:
+  - identifies the benchmark harness
+  - recalls modular adapters
+  - recalls output formats
+must_recover:
+  - benchmark harness
+  - adapters modular
+  - CSV JSON and Markdown
+useful_to_recover:
+  - continuity benchmark
+  - deterministic and local-first
+distractors:
+  - GovOS service tokens
+  - FlowOne lineage sidebar
+success_criteria:
+  - mentions scoring or reporting
+expected_paths:
+  - projects/fractal-memory-cli
+answer_rubric:
+  expected_phrases:
+    - benchmark harness
+    - adapters modular
+    - CSV JSON and Markdown
+  forbidden_phrases:
+    - GovOS service tokens
+    - FlowOne lineage sidebar
+  unsupported_claim_patterns:
+    - "already shipped.*"

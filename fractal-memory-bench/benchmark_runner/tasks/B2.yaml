@@ -1,0 +1,38 @@
+id: B2
+category: branch-selective-retrieval
+project: fractal-memory-cli
+prompt: "Recover the MCP decision for Fractal Memory specifically."
+gold_standard:
+  - says MCP is optional
+  - says MCP is a thin wrapper
+must_recover:
+  - optional wrapper
+  - core logic independent of CLI and MCP
+  - thin wrappers over core services
+useful_to_recover:
+  - tools first
+  - not the design center
+distractors:
+  - GovOS authentication
+  - FlowOne feature store
+success_criteria:
+  - avoid non-Fractal material
+expected_paths:
+  - projects/fractal-memory-cli
+answer_rubric:
+  expected_phrases:
+    - optional wrapper
+    - core logic independent of CLI and MCP
+    - thin wrappers over core services
+  forbidden_phrases:
+    - GovOS authentication
+    - FlowOne feature store
+  unsupported_claim_patterns:
+    - "already implemented in production.*"
+short_answer_target:
+  project_branch: "Fractal Memory CLI"
+  current_objective: "Recover the MCP decision for Fractal Memory."
+  key_prior_decision: "MCP is an optional wrapper and not the design center."
+  active_constraint: "Core logic must stay independent of CLI and MCP."
+  next_best_action: "Use MCP only as a thin wrapper over core services."
+  missing_information: "Any broader implementation detail not stated in retrieved memory."

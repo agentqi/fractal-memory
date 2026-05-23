@@ -1,0 +1,42 @@
+id: A1
+category: resume-after-reset
+project: fractal-memory-cli
+prompt: "Resume the Fractal Memory CLI implementation planning from where we left off."
+gold_standard:
+  - identifies Fractal Memory CLI
+  - recovers benchmark harness work
+  - notes MCP is optional
+  - proposes scoring and reporting work
+must_recover:
+  - benchmark harness
+  - optional wrapper
+  - scoring logic
+useful_to_recover:
+  - CLI-first MVP
+  - JIT-first and AOT-ready later
+distractors:
+  - GovOS authentication
+  - FlowOne traceability
+  - archived workflow tooling
+success_criteria:
+  - mention CSV JSON and Markdown exports
+expected_paths:
+  - projects/fractal-memory-cli
+answer_rubric:
+  expected_phrases:
+    - Fractal Memory CLI
+    - benchmark harness
+    - optional wrapper
+  forbidden_phrases:
+    - GovOS authentication
+    - FlowOne traceability
+  unsupported_claim_patterns:
+    - "already finalized.*"
+    - "you previously approved.*"
+short_answer_target:
+  project_branch: "Fractal Memory CLI"
+  current_objective: "Finish the FractalMemoryBench benchmark harness."
+  key_prior_decision: "MCP remains an optional wrapper."
+  active_constraint: "Core logic must stay independent of CLI and MCP."
+  next_best_action: "Finish scoring and reporting."
+  missing_information: "Anything not explicitly recorded in the retrieved memory."
