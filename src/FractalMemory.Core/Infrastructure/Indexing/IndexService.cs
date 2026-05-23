@@ -132,10 +132,10 @@ public sealed class IndexService(
             FileHashes = hashes,
             Files = new Dictionary<string, CachedMarkdownFile>(StringComparer.Ordinal)
             {
-                ["index.md"] = BuildCachedFile(node.IndexContent),
-                ["state.md"] = BuildCachedFile(node.StateContent),
-                ["timeline.md"] = BuildCachedFile(node.TimelineContent),
-                ["decisions.md"] = BuildCachedFile(node.DecisionsContent),
+                [node.IndexFileName] = BuildCachedFile(node.IndexContent),
+                [node.StateFileName] = BuildCachedFile(node.StateContent),
+                [node.TimelineFileName] = BuildCachedFile(node.TimelineContent),
+                [node.DecisionsFileName] = BuildCachedFile(node.DecisionsContent),
             },
             Evidence = evidence.Select(result => new CachedEvidence
             {
@@ -168,10 +168,10 @@ public sealed class IndexService(
     private static IReadOnlyDictionary<string, string> BuildFileHashes(MemoryNode node) =>
         new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            ["index.md"] = Hash(node.IndexContent),
-            ["state.md"] = Hash(node.StateContent),
-            ["timeline.md"] = Hash(node.TimelineContent),
-            ["decisions.md"] = Hash(node.DecisionsContent),
+            [node.IndexFileName] = Hash(node.IndexContent),
+            [node.StateFileName] = Hash(node.StateContent),
+            [node.TimelineFileName] = Hash(node.TimelineContent),
+            [node.DecisionsFileName] = Hash(node.DecisionsContent),
         };
 
     private static string Hash(string content)

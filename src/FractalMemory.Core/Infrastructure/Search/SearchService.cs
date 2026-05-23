@@ -1,5 +1,6 @@
 using FractalMemory.Core.Application.Services;
 using FractalMemory.Core.Domain.Models;
+using FractalMemory.Core.Infrastructure.Parsing;
 
 namespace FractalMemory.Core.Infrastructure.Search;
 
@@ -97,37 +98,37 @@ public sealed class SearchService(
                 profile,
                 node,
                 title,
-                "index.md",
+                node.IndexFileName,
                 node.IndexContent,
                 config.Retrieval.MaxSnippetLines)));
             candidates.AddRange(ToResults(node, title, RetrievalPipeline.BuildSearchCandidates(
                 profile,
                 node,
                 title,
-                "state.md",
+                node.StateFileName,
                 node.StateContent,
                 config.Retrieval.MaxSnippetLines)));
             candidates.AddRange(ToResults(node, title, RetrievalPipeline.BuildSearchCandidates(
                 profile,
                 node,
                 title,
-                "timeline.md",
+                node.TimelineFileName,
                 node.TimelineContent,
                 config.Retrieval.MaxSnippetLines)));
             candidates.AddRange(ToResults(node, title, RetrievalPipeline.BuildSearchCandidates(
                 profile,
                 node,
                 title,
-                "decisions.md",
+                node.DecisionsFileName,
                 node.DecisionsContent,
                 config.Retrieval.MaxSnippetLines)));
 
             var artifactsDirectory = Path.Combine(node.FullPath, "artifacts");
             foreach (var artifact in fileSystemService.EnumerateFiles(artifactsDirectory, "*", SearchOption.AllDirectories))
             {
-                if (Path.GetExtension(artifact).Equals(".md", StringComparison.OrdinalIgnoreCase))
+                if (IsSearchableArtifact(artifact))
                 {
-                    var content = await fileSystemService.ReadAllTextAsync(artifact, cancellationToken);
+                    var content = await ReadArtifactContentAsync(fileSystemService, artifact, cancellationToken);
                     var relativeArtifact = Path.GetRelativePath(artifactsDirectory, artifact).Replace(Path.DirectorySeparatorChar, '/');
                     candidates.AddRange(ToResults(node, title, RetrievalPipeline.BuildSearchCandidates(
                         profile,
@@ -172,7 +173,7 @@ public sealed class SearchService(
             .Where(node => string.IsNullOrWhiteSpace(scope) || node.RelativePath.StartsWith(scope!, StringComparison.OrdinalIgnoreCase))
             .Select(node =>
             {
-                var files = new[] { "index.md", "state.md", "timeline.md", "decisions.md" }
+                var files = new[] { node.IndexFileName, node.StateFileName, node.TimelineFileName, node.DecisionsFileName }
                     .Select(file => Path.Combine(node.FullPath, file))
                     .Where(fileSystemService.FileExists)
                     .Select(path => new { Path = path, LastModified = fileSystemService.GetLastWriteTimeUtc(path) })
@@ -215,4 +216,25 @@ public sealed class SearchService(
             Score = candidate.Score,
             ScoreBreakdown = candidate.Breakdown,
         }).ToArray();
+
+    private static bool IsSearchableArtifact(string path)
+    {
+        var extension = Path.GetExtension(path);
+        return extension.Equals(".md", StringComparison.OrdinalIgnoreCase) ||
+            extension.Equals(".html", StringComparison.OrdinalIgnoreCase) ||
+            extension.Equals(".htm", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static async Task<string> ReadArtifactContentAsync(
+        IFileSystemService fileSystemService,
+        string path,
+        CancellationToken cancellationToken)
+    {
+        var content = await fileSystemService.ReadAllTextAsync(path, cancellationToken);
+        var extension = Path.GetExtension(path);
+        return extension.Equals(".html", StringComparison.OrdinalIgnoreCase) ||
+            extension.Equals(".htm", StringComparison.OrdinalIgnoreCase)
+            ? HtmlTextExtractor.ToText(content)
+            : content;
+    }
 }

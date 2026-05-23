@@ -1,0 +1,41 @@
+{
+  "name": "codex-fractalmem",
+  "version": "0.1.0",
+  "description": "Use FractalMem local-first structured memory from Codex through MCP tools and focused workflows.",
+  "author": {
+    "name": "AgentQI",
+    "url": "https://github.com/agentqi"
+  },
+  "homepage": "https://github.com/agentqi/fractal-memory",
+  "repository": "https://github.com/agentqi/fractal-memory",
+  "license": "Apache-2.0",
+  "keywords": [
+    "memory",
+    "mcp",
+    "codex",
+    "local-first",
+    "handoff"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "FractalMem",
+    "shortDescription": "Local structured memory for Codex",
+    "longDescription": "Use FractalMem to initialize local memory repositories, open focused project memory, search durable context, export AI-ready summaries, and create handoffs without sending memory to a hosted service.",
+    "developerName": "AgentQI",
+    "category": "Coding",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/agentqi/fractal-memory",
+    "defaultPrompt": [
+      "Resume this project from FractalMem",
+      "Search local memory for this decision",
+      "Create a FractalMem handoff"
+    ],
+    "brandColor": "#2563EB",
+    "screenshots": []
+  }
+}

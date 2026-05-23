@@ -1,4 +1,6 @@
 using FractalMemory.Core.Application.Services;
+using FractalMemory.Core.Domain.Enums;
+using FractalMemory.Core.Domain.Models;
 using FractalMemory.Core.Domain.Rules;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -38,6 +40,43 @@ public sealed class RepositoryWorkflowTests
         Assert.True(File.Exists(Path.Combine(temp, ".fractal-memory", "projects", "flowone", "children", "frontend", "state.md")));
         Assert.True(Directory.Exists(Path.Combine(temp, ".fractal-memory", "projects", "flowone", "children", "frontend", "children")));
         Assert.True(Directory.Exists(Path.Combine(temp, ".fractal-memory", "projects", "flowone", "children", "frontend", "artifacts")));
+    }
+
+    [Fact]
+    public async Task CreateNodeCanUseHtmlNodeFiles()
+    {
+        using var provider = TestEnvironment.CreateServices();
+        var repositoryService = provider.GetRequiredService<IRepositoryService>();
+        var nodeService = provider.GetRequiredService<INodeService>();
+        var readService = provider.GetRequiredService<IReadService>();
+        var searchService = provider.GetRequiredService<ISearchService>();
+        var validationService = provider.GetRequiredService<IValidationService>();
+        var temp = TestEnvironment.CreateTempDirectory();
+
+        await repositoryService.InitializeAsync(temp, CancellationToken.None);
+        var node = await nodeService.CreateNodeAsync(temp, "projects/html-node", CancellationToken.None, NodeFileFormat.Html);
+        var nodeRoot = Path.Combine(temp, ".fractal-memory", "projects", "html-node");
+        await File.WriteAllTextAsync(Path.Combine(nodeRoot, "state.html"), """
+            <!doctype html>
+            <html lang="en">
+            <head><title>HTML Node State</title></head>
+            <body>
+              <h1>Current State</h1>
+              <p>The launch dashboard uses first-class HTML node files.</p>
+            </body>
+            </html>
+            """);
+
+        var opened = await readService.OpenAsync(temp, "projects/html-node", RetrievalDepth.Working, NodeViewType.Index, CancellationToken.None);
+        var results = await searchService.SearchAsync(temp, "first-class HTML node files", CancellationToken.None);
+        var report = await validationService.ValidateAsync(temp, CancellationToken.None);
+
+        Assert.Equal("index.html", node.IndexFileName);
+        Assert.True(File.Exists(Path.Combine(nodeRoot, "index.html")));
+        Assert.True(File.Exists(Path.Combine(nodeRoot, "state.html")));
+        Assert.Contains("launch dashboard", opened.CurrentState, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("state.html", results[0].MatchedFile);
+        Assert.DoesNotContain(report.Issues, issue => issue.Severity == ValidationSeverity.Error);
     }
 
     [Fact]

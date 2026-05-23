@@ -24,6 +24,12 @@ public enum NodeViewType
     Children,
 }
 
+public enum NodeFileFormat
+{
+    Markdown,
+    Html,
+}
+
 public enum NodeStatus
 {
     Active,

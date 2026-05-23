@@ -5,6 +5,7 @@ using FractalMemory.Core.Application.Services;
 using FractalMemory.Core.Domain.Enums;
 using FractalMemory.Core.Domain.Models;
 using FractalMemory.Core.Domain.Rules;
+using FractalMemory.Core.Infrastructure.Parsing;
 using YamlDotNet.Serialization;
 
 namespace FractalMemory.Core.Infrastructure.Files;
@@ -164,7 +165,11 @@ public sealed class NodeService(
 {
     public string NormalizeNodePath(string inputPath) => NodePathRules.Normalize(inputPath);
 
-    public async Task<MemoryNode> CreateNodeAsync(string workingDirectory, string nodePath, CancellationToken cancellationToken)
+    public async Task<MemoryNode> CreateNodeAsync(
+        string workingDirectory,
+        string nodePath,
+        CancellationToken cancellationToken,
+        NodeFileFormat format = NodeFileFormat.Markdown)
     {
         var repositoryRoot = repositoryService.FindRepositoryRoot(workingDirectory)
             ?? throw new InvalidOperationException("No FractalMemory repository found.");
@@ -181,7 +186,7 @@ public sealed class NodeService(
         fileSystemService.CreateDirectory(Path.Combine(fullPath, "children"));
         fileSystemService.CreateDirectory(Path.Combine(fullPath, "artifacts"));
 
-        var templates = await templateService.GetNodeTemplatesAsync(repositoryRoot, Path.GetFileName(normalizedPath), cancellationToken);
+        var templates = await templateService.GetNodeTemplatesAsync(repositoryRoot, Path.GetFileName(normalizedPath), format, cancellationToken);
         foreach (var template in templates)
         {
             await fileSystemService.WriteAllTextAsync(Path.Combine(fullPath, template.Key), template.Value + Environment.NewLine, cancellationToken);
@@ -201,12 +206,12 @@ public sealed class NodeService(
     public async Task<IReadOnlyList<MemoryNode>> GetAllNodesAsync(string repositoryRoot, CancellationToken cancellationToken)
     {
         var storageRoot = repositoryService.GetStorageRoot(repositoryRoot);
-        var directories = fileSystemService.EnumerateFiles(storageRoot, "index.md", SearchOption.AllDirectories)
+        var directories = EnumerateNodeIndexFiles(storageRoot)
             .Select(Path.GetDirectoryName)
             .Where(path => !string.IsNullOrWhiteSpace(path))
             .Cast<string>()
             .Distinct(StringComparer.Ordinal)
-            .Where(path => fileSystemService.FileExists(Path.Combine(path, "state.md")))
+            .Where(path => HasNodeFile(path, "state"))
             .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}templates{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
                 && !path.Contains($"{Path.DirectorySeparatorChar}archive{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
             .ToArray();
@@ -227,8 +232,8 @@ public sealed class NodeService(
         var children = new List<MemoryNode>();
         foreach (var childDirectory in fileSystemService.EnumerateDirectories(childrenDirectory))
         {
-            if (!fileSystemService.FileExists(Path.Combine(childDirectory, "index.md")) ||
-                !fileSystemService.FileExists(Path.Combine(childDirectory, "state.md")))
+            if (!HasNodeFile(childDirectory, "index") ||
+                !HasNodeFile(childDirectory, "state"))
             {
                 continue;
             }
@@ -250,15 +255,19 @@ public sealed class NodeService(
             throw new InvalidOperationException($"Node '{normalizedPath}' does not exist.");
         }
 
-        var index = await markdownFileService.ReadAsync(Path.Combine(fullPath, "index.md"), cancellationToken);
-        var state = await markdownFileService.ReadAsync(Path.Combine(fullPath, "state.md"), cancellationToken);
-        var timelinePath = Path.Combine(fullPath, "timeline.md");
-        var decisionsPath = Path.Combine(fullPath, "decisions.md");
-        var timeline = fileSystemService.FileExists(timelinePath)
-            ? await markdownFileService.ReadAsync(timelinePath, cancellationToken)
+        var indexPath = ResolveNodeFile(fullPath, "index")
+            ?? throw new InvalidOperationException($"Node '{normalizedPath}' is missing index.md or index.html.");
+        var statePath = ResolveNodeFile(fullPath, "state")
+            ?? throw new InvalidOperationException($"Node '{normalizedPath}' is missing state.md or state.html.");
+        var timelinePath = ResolveNodeFile(fullPath, "timeline");
+        var decisionsPath = ResolveNodeFile(fullPath, "decisions");
+        var index = await ReadNodeDocumentAsync(indexPath, cancellationToken);
+        var state = await ReadNodeDocumentAsync(statePath, cancellationToken);
+        var timeline = timelinePath is not null
+            ? await ReadNodeDocumentAsync(timelinePath, cancellationToken)
             : new ParsedMarkdownDocument { Metadata = new NodeMetadata(), Content = string.Empty };
-        var decisions = fileSystemService.FileExists(decisionsPath)
-            ? await markdownFileService.ReadAsync(decisionsPath, cancellationToken)
+        var decisions = decisionsPath is not null
+            ? await ReadNodeDocumentAsync(decisionsPath, cancellationToken)
             : new ParsedMarkdownDocument { Metadata = new NodeMetadata(), Content = string.Empty };
 
         return new MemoryNode
@@ -266,11 +275,54 @@ public sealed class NodeService(
             RelativePath = normalizedPath,
             FullPath = fullPath,
             Metadata = MergeMetadata(index.Metadata, state.Metadata),
+            IndexFileName = Path.GetFileName(indexPath),
+            StateFileName = Path.GetFileName(statePath),
+            TimelineFileName = timelinePath is null ? "timeline.md" : Path.GetFileName(timelinePath),
+            DecisionsFileName = decisionsPath is null ? "decisions.md" : Path.GetFileName(decisionsPath),
             IndexContent = index.Content,
             StateContent = state.Content,
             TimelineContent = timeline.Content,
             DecisionsContent = decisions.Content,
         };
+    }
+
+    private IEnumerable<string> EnumerateNodeIndexFiles(string storageRoot) =>
+        fileSystemService.EnumerateFiles(storageRoot, "index.md", SearchOption.AllDirectories)
+            .Concat(fileSystemService.EnumerateFiles(storageRoot, "index.html", SearchOption.AllDirectories))
+            .Concat(fileSystemService.EnumerateFiles(storageRoot, "index.htm", SearchOption.AllDirectories));
+
+    private bool HasNodeFile(string directory, string baseName) => ResolveNodeFile(directory, baseName) is not null;
+
+    private string? ResolveNodeFile(string directory, string baseName)
+    {
+        foreach (var extension in new[] { ".md", ".html", ".htm" })
+        {
+            var path = Path.Combine(directory, baseName + extension);
+            if (fileSystemService.FileExists(path))
+            {
+                return path;
+            }
+        }
+
+        return null;
+    }
+
+    private async Task<ParsedMarkdownDocument> ReadNodeDocumentAsync(string path, CancellationToken cancellationToken)
+    {
+        var extension = Path.GetExtension(path);
+        if (extension.Equals(".html", StringComparison.OrdinalIgnoreCase) ||
+            extension.Equals(".htm", StringComparison.OrdinalIgnoreCase))
+        {
+            var html = await fileSystemService.ReadAllTextAsync(path, cancellationToken);
+            var title = HtmlTextExtractor.ExtractTitle(html);
+            return new ParsedMarkdownDocument
+            {
+                Metadata = new NodeMetadata { Title = title },
+                Content = HtmlTextExtractor.ToText(html),
+            };
+        }
+
+        return await markdownFileService.ReadAsync(path, cancellationToken);
     }
 
     private static NodeMetadata MergeMetadata(NodeMetadata primary, NodeMetadata secondary) =>
@@ -338,10 +390,10 @@ public sealed class ReadService(
 
     private static IReadOnlyList<string> BuildSuggestedReads(MemoryNode node, IReadOnlyList<MemoryNode> children)
     {
-        var suggestions = new List<string> { $"{node.RelativePath}/state.md" };
+        var suggestions = new List<string> { $"{node.RelativePath}/{node.StateFileName}" };
         if (!string.IsNullOrWhiteSpace(node.DecisionsContent))
         {
-            suggestions.Add($"{node.RelativePath}/decisions.md");
+            suggestions.Add($"{node.RelativePath}/{node.DecisionsFileName}");
         }
 
         suggestions.AddRange(children.Take(3).Select(child => child.RelativePath));
@@ -451,9 +503,9 @@ public sealed class HandoffService(
         var nextActions = answerContext.NextBestActions.Count > 0 ? answerContext.NextBestActions : BuildNextActions(opened);
         var readFirst = answerContext.SupportingSources.Select(source => source.SourcePath).Distinct(StringComparer.Ordinal).Concat(new[]
         {
-            $"{opened.RelativePath}/index.md",
-            $"{opened.RelativePath}/state.md",
-            $"{opened.RelativePath}/decisions.md",
+            $"{opened.RelativePath}/{node.IndexFileName}",
+            $"{opened.RelativePath}/{node.StateFileName}",
+            $"{opened.RelativePath}/{node.DecisionsFileName}",
         }).Distinct(StringComparer.Ordinal).ToArray();
         var sourceReferences = answerContext.SupportingSources
             .Select(source =>
@@ -576,14 +628,14 @@ public sealed class ValidationService(
         var config = await repositoryService.LoadConfigAsync(repositoryRoot, cancellationToken);
         var issues = new List<ValidationIssue>();
         var storageRoot = repositoryService.GetStorageRoot(repositoryRoot);
-        var candidateDirectories = fileSystemService.EnumerateFiles(storageRoot, "*.md", SearchOption.AllDirectories)
+        var candidateDirectories = EnumerateMemoryFiles(storageRoot)
             .Select(Path.GetDirectoryName)
             .Where(path => !string.IsNullOrWhiteSpace(path))
             .Cast<string>()
             .Distinct(StringComparer.Ordinal)
             .Where(path =>
-                fileSystemService.FileExists(Path.Combine(path, "index.md")) ||
-                fileSystemService.FileExists(Path.Combine(path, "state.md")))
+                ResolveNodeFile(path, "index") is not null ||
+                ResolveNodeFile(path, "state") is not null)
             .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}templates{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
             .ToArray();
 
@@ -600,54 +652,54 @@ public sealed class ValidationService(
                 issues.Add(new ValidationIssue { Severity = ValidationSeverity.Error, RelativePath = relativePath, Message = exception.Message });
             }
 
-            var indexPath = Path.Combine(directory, "index.md");
-            var statePath = Path.Combine(directory, "state.md");
-            if (config.Validation.RequireIndex && !fileSystemService.FileExists(indexPath))
+            var indexPath = ResolveNodeFile(directory, "index");
+            var statePath = ResolveNodeFile(directory, "state");
+            if (config.Validation.RequireIndex && indexPath is null)
             {
-                issues.Add(new ValidationIssue { Severity = ValidationSeverity.Error, RelativePath = relativePath, Message = "Missing required index.md." });
+                issues.Add(new ValidationIssue { Severity = ValidationSeverity.Error, RelativePath = relativePath, Message = "Missing required index.md or index.html." });
             }
 
-            if (config.Validation.RequireState && !fileSystemService.FileExists(statePath))
+            if (config.Validation.RequireState && statePath is null)
             {
-                issues.Add(new ValidationIssue { Severity = ValidationSeverity.Error, RelativePath = relativePath, Message = "Missing required state.md." });
+                issues.Add(new ValidationIssue { Severity = ValidationSeverity.Error, RelativePath = relativePath, Message = "Missing required state.md or state.html." });
             }
 
-            foreach (var markdownFile in new[] { indexPath, statePath, Path.Combine(directory, "timeline.md"), Path.Combine(directory, "decisions.md") })
+            foreach (var memoryFile in new[] { indexPath, statePath, ResolveNodeFile(directory, "timeline"), ResolveNodeFile(directory, "decisions") })
             {
-                if (!fileSystemService.FileExists(markdownFile))
+                if (memoryFile is null)
                 {
                     continue;
                 }
 
                 try
                 {
-                    var document = await markdownFileService.ReadAsync(markdownFile, cancellationToken);
-                    if (Path.GetFileName(markdownFile).Equals("state.md", StringComparison.Ordinal) && string.IsNullOrWhiteSpace(document.Content))
+                    var document = await ReadMemoryFileAsync(memoryFile, cancellationToken);
+                    if (Path.GetFileNameWithoutExtension(memoryFile).Equals("state", StringComparison.Ordinal) && string.IsNullOrWhiteSpace(document.Content))
                     {
-                        issues.Add(new ValidationIssue { Severity = ValidationSeverity.Warning, RelativePath = relativePath, Message = "state.md is empty." });
+                        issues.Add(new ValidationIssue { Severity = ValidationSeverity.Warning, RelativePath = relativePath, Message = $"{Path.GetFileName(memoryFile)} is empty." });
                     }
 
                     if (string.IsNullOrWhiteSpace(document.Metadata.Title))
                     {
-                        issues.Add(new ValidationIssue { Severity = ValidationSeverity.Warning, RelativePath = relativePath, Message = $"{Path.GetFileName(markdownFile)} is missing a title." });
+                        issues.Add(new ValidationIssue { Severity = ValidationSeverity.Warning, RelativePath = relativePath, Message = $"{Path.GetFileName(memoryFile)} is missing a title." });
                     }
 
-                    if (document.Metadata.LastUpdated is null)
+                    if (Path.GetExtension(memoryFile).Equals(".md", StringComparison.OrdinalIgnoreCase) && document.Metadata.LastUpdated is null)
                     {
-                        issues.Add(new ValidationIssue { Severity = ValidationSeverity.Warning, RelativePath = relativePath, Message = $"{Path.GetFileName(markdownFile)} is missing last_updated." });
+                        issues.Add(new ValidationIssue { Severity = ValidationSeverity.Warning, RelativePath = relativePath, Message = $"{Path.GetFileName(memoryFile)} is missing last_updated." });
                     }
                 }
                 catch (Exception exception)
                 {
-                    issues.Add(new ValidationIssue { Severity = ValidationSeverity.Error, RelativePath = relativePath, Message = $"{Path.GetFileName(markdownFile)} has malformed front matter: {exception.Message}" });
+                    issues.Add(new ValidationIssue { Severity = ValidationSeverity.Error, RelativePath = relativePath, Message = $"{Path.GetFileName(memoryFile)} has malformed content: {exception.Message}" });
                 }
             }
 
-            if (fileSystemService.FileExists(indexPath))
+            if (indexPath is not null)
             {
                 try
                 {
-                    var indexDocument = await markdownFileService.ReadAsync(indexPath, cancellationToken);
+                    var indexDocument = await ReadMemoryFileAsync(indexPath, cancellationToken);
                     var referencedChildren = Regex.Matches(indexDocument.Content, @"children/([a-z0-9/-]+)")
                         .Select(match => match.Groups[1].Value)
                         .Distinct(StringComparer.Ordinal);
@@ -684,7 +736,7 @@ public sealed class ValidationService(
             });
         }
 
-        var latestNodeWrite = fileSystemService.EnumerateFiles(storageRoot, "*.md", SearchOption.AllDirectories)
+        var latestNodeWrite = EnumerateMemoryFiles(storageRoot)
             .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}templates{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
             .Select(fileSystemService.GetLastWriteTimeUtc)
             .DefaultIfEmpty(DateTimeOffset.MinValue)
@@ -705,5 +757,41 @@ public sealed class ValidationService(
         }
 
         return new ValidationReport { Issues = issues.OrderByDescending(issue => issue.Severity).ThenBy(issue => issue.RelativePath, StringComparer.Ordinal).ToArray() };
+    }
+
+    private IEnumerable<string> EnumerateMemoryFiles(string storageRoot) =>
+        fileSystemService.EnumerateFiles(storageRoot, "*.md", SearchOption.AllDirectories)
+            .Concat(fileSystemService.EnumerateFiles(storageRoot, "*.html", SearchOption.AllDirectories))
+            .Concat(fileSystemService.EnumerateFiles(storageRoot, "*.htm", SearchOption.AllDirectories));
+
+    private string? ResolveNodeFile(string directory, string baseName)
+    {
+        foreach (var extension in new[] { ".md", ".html", ".htm" })
+        {
+            var path = Path.Combine(directory, baseName + extension);
+            if (fileSystemService.FileExists(path))
+            {
+                return path;
+            }
+        }
+
+        return null;
+    }
+
+    private async Task<ParsedMarkdownDocument> ReadMemoryFileAsync(string path, CancellationToken cancellationToken)
+    {
+        var extension = Path.GetExtension(path);
+        if (extension.Equals(".html", StringComparison.OrdinalIgnoreCase) ||
+            extension.Equals(".htm", StringComparison.OrdinalIgnoreCase))
+        {
+            var html = await fileSystemService.ReadAllTextAsync(path, cancellationToken);
+            return new ParsedMarkdownDocument
+            {
+                Metadata = new NodeMetadata { Title = HtmlTextExtractor.ExtractTitle(html) },
+                Content = HtmlTextExtractor.ToText(html),
+            };
+        }
+
+        return await markdownFileService.ReadAsync(path, cancellationToken);
     }
 }

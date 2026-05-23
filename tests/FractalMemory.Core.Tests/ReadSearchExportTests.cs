@@ -89,6 +89,42 @@ public sealed class ReadSearchExportTests
     }
 
     [Fact]
+    public async Task SearchIndexesHtmlArtifactsAsReadableText()
+    {
+        using var provider = TestEnvironment.CreateServices();
+        var repositoryService = provider.GetRequiredService<IRepositoryService>();
+        var nodeService = provider.GetRequiredService<INodeService>();
+        var searchService = provider.GetRequiredService<ISearchService>();
+        var temp = TestEnvironment.CreateTempDirectory();
+
+        await repositoryService.InitializeAsync(temp, CancellationToken.None);
+        await nodeService.CreateNodeAsync(temp, "projects/html-artifacts", CancellationToken.None);
+        var artifactsRoot = Path.Combine(temp, ".fractal-memory", "projects", "html-artifacts", "artifacts");
+        await File.WriteAllTextAsync(Path.Combine(artifactsRoot, "design.html"), """
+            <!doctype html>
+            <html>
+              <head>
+                <title>Design Notes</title>
+                <style>.hidden { display: none; }</style>
+              </head>
+              <body>
+                <h1>Launch Architecture</h1>
+                <p>The signup funnel uses the aurora onboarding prototype.</p>
+                <script>const secret = "ignore script content";</script>
+              </body>
+            </html>
+            """);
+
+        var results = await searchService.SearchAsync(temp, "aurora onboarding prototype", CancellationToken.None);
+
+        Assert.NotEmpty(results);
+        Assert.Equal("projects/html-artifacts", results[0].RelativePath);
+        Assert.Equal("artifacts/design.html", results[0].MatchedFile);
+        Assert.Contains("signup funnel", results[0].Snippet, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("ignore script content", results[0].Snippet, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task OpenSplitsParagraphsAcrossCrLfContent()
     {
         using var provider = TestEnvironment.CreateServices();

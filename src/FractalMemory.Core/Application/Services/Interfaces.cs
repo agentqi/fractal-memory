@@ -14,7 +14,11 @@ public interface IRepositoryService
 public interface INodeService
 {
     string NormalizeNodePath(string inputPath);
-    Task<MemoryNode> CreateNodeAsync(string workingDirectory, string nodePath, CancellationToken cancellationToken);
+    Task<MemoryNode> CreateNodeAsync(
+        string workingDirectory,
+        string nodePath,
+        CancellationToken cancellationToken,
+        NodeFileFormat format = NodeFileFormat.Markdown);
     Task<MemoryNode> GetNodeAsync(string workingDirectory, string nodePath, CancellationToken cancellationToken);
     Task<IReadOnlyList<MemoryNode>> GetAllNodesAsync(string repositoryRoot, CancellationToken cancellationToken);
     Task<IReadOnlyList<MemoryNode>> GetChildNodesAsync(string repositoryRoot, MemoryNode node, CancellationToken cancellationToken);
@@ -102,10 +106,11 @@ public interface IFrontMatterParser
 public interface ITemplateService
 {
     IReadOnlyDictionary<string, string> GetRepositoryTemplates();
-    IReadOnlyDictionary<string, string> GetNodeTemplates(string nodeName);
+    IReadOnlyDictionary<string, string> GetNodeTemplates(string nodeName, NodeFileFormat format = NodeFileFormat.Markdown);
     Task<IReadOnlyDictionary<string, string>> GetNodeTemplatesAsync(
         string repositoryRoot,
         string nodeName,
+        NodeFileFormat format,
         CancellationToken cancellationToken);
 }
 

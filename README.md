@@ -2,6 +2,13 @@
 
 FractalMem is a local-first structured memory system for AI-assisted work. It stores durable project memory as markdown files in a fractal hierarchy so humans and agents can load only the relevant branch instead of dragging full history into every context.
 
+FractalMem is designed to run as:
+
+- a local `fm` CLI
+- a stdio MCP server for agent clients
+- a Codex plugin
+- a Claude Code plugin
+
 The solution is split into:
 
 - `FractalMemory.Core`: domain, services, filesystem logic, indexing, search, export, validation, and formatting
@@ -12,12 +19,12 @@ The solution is split into:
 
 Each memory node behaves like a chapter:
 
-- `index.md`: front door, summary, navigation
-- `state.md`: current working truth
-- `timeline.md`: chronological updates
-- `decisions.md`: important decisions and rationale
+- `index.md` or `index.html`: front door, summary, navigation
+- `state.md` or `state.html`: current working truth
+- `timeline.md` or `timeline.html`: chronological updates
+- `decisions.md` or `decisions.html`: important decisions and rationale
 - `children/`: nested subnodes
-- `artifacts/`: supporting files
+- `artifacts/`: supporting markdown and HTML files
 
 Files are the source of truth. Index files are accelerators, not authorities.
 
@@ -34,6 +41,10 @@ src/
 tests/
   FractalMemory.Core.Tests/
   FractalMemory.Cli.Tests/
+
+plugins/
+  codex-fractalmem/
+  claude-fractalmem/
 ```
 
 ## Build
@@ -69,10 +80,25 @@ dotnet build /Users/telli/Desktop/fm\ cli/src/FractalMemory.Cli
 ./src/FractalMemory.Cli/bin/Debug/net10.0/fm init
 ```
 
+Pack local .NET tools:
+
+```bash
+dotnet pack src/FractalMemory.Cli
+dotnet pack src/FractalMemory.McpServer
+```
+
+Install from a local package output:
+
+```bash
+dotnet tool install -g FractalMemory.Cli --add-source ./src/FractalMemory.Cli/bin/Release
+dotnet tool install -g FractalMemory.McpServer --add-source ./src/FractalMemory.McpServer/bin/Release
+```
+
 ## Example CLI Commands
 
 - `fm init`
 - `fm node create projects/fractal-memory-cli`
+- `fm node create projects/design-notes --format html`
 - `fm open projects/fractal-memory-cli`
 - `fm open projects/fractal-memory-cli --depth 2`
 - `fm search "context bloat"`
@@ -81,6 +107,28 @@ dotnet build /Users/telli/Desktop/fm\ cli/src/FractalMemory.Cli
 - `fm recent`
 - `fm index refresh`
 - `fm validate`
+
+## Agent Plugins
+
+FractalMem exposes the same core operations through a stdio MCP server:
+
+```bash
+fractalmem-mcp
+```
+
+The MCP server resolves the repository from its current working directory, or from `FRACTALMEM_REPOSITORY_ROOT` when an agent client launches it from another directory.
+
+Plugin skeletons live under:
+
+- `plugins/codex-fractalmem/`
+- `plugins/claude-fractalmem/`
+
+Marketplace metadata lives under:
+
+- `.agents/plugins/marketplace.json`
+- `.claude-plugin/marketplace.json`
+
+See `docs/plugins.md` for plugin packaging notes.
 
 ## Repository Layout
 
@@ -118,10 +166,10 @@ Each created node contains:
 
 ```text
 <node>/
-  index.md
-  state.md
-  timeline.md
-  decisions.md
+  index.md      # or index.html when created with --format html
+  state.md      # or state.html
+  timeline.md   # or timeline.html
+  decisions.md  # or decisions.html
   children/
   artifacts/
 ```
@@ -129,7 +177,7 @@ Each created node contains:
 ## CLI Behavior Summary
 
 - `init` creates the repository, config, templates, root files, and index stubs.
-- `node create` normalizes and validates the path, creates the standard node contract, and refreshes indexes when indexing is enabled.
+- `node create` normalizes and validates the path, creates the standard node contract as markdown or HTML, and refreshes indexes when indexing is enabled.
 - `open` supports layered retrieval with depth `0..3` and optional focused views.
 - `search` ranks exact path, title, alias, tag, then markdown content matches.
 - `export` emits AI-friendly structured output with stable source labels.
@@ -199,3 +247,4 @@ Typical agent workflow:
 - YAML front matter parsing is isolated behind `IFrontMatterParser`.
 - The implementation is built for standard .NET 10 JIT execution first, while keeping the architecture relatively AOT-friendly.
 - There is no database, network storage, telemetry, GUI, or cloud dependency in the core MVP.
+- Benchmarking lives separately at https://github.com/agentqi/fractal-memory-bench.

@@ -49,7 +49,23 @@ public sealed class McpRepositoryContext(IRepositoryService repositoryService) :
     public string GetNodeFilePath(string encodedNodePath, string fileName)
     {
         var normalizedPath = NodePathRules.Normalize(Uri.UnescapeDataString(encodedNodePath));
-        return GetStoragePath($"{normalizedPath}/{fileName}");
+        var requested = GetStoragePath($"{normalizedPath}/{fileName}");
+        if (File.Exists(requested) || !Path.GetExtension(fileName).Equals(".md", StringComparison.OrdinalIgnoreCase))
+        {
+            return requested;
+        }
+
+        var baseName = Path.GetFileNameWithoutExtension(fileName);
+        foreach (var extension in new[] { ".html", ".htm" })
+        {
+            var candidate = GetStoragePath($"{normalizedPath}/{baseName}{extension}");
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        return requested;
     }
 
     private static string GetStartDirectory()

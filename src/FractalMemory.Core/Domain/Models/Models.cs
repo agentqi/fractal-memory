@@ -49,6 +49,10 @@ public sealed class MemoryNode
     public required string RelativePath { get; init; }
     public required string FullPath { get; init; }
     public required NodeMetadata Metadata { get; init; }
+    public string IndexFileName { get; init; } = "index.md";
+    public string StateFileName { get; init; } = "state.md";
+    public string TimelineFileName { get; init; } = "timeline.md";
+    public string DecisionsFileName { get; init; } = "decisions.md";
     public string IndexContent { get; init; } = string.Empty;
     public string StateContent { get; init; } = string.Empty;
     public string TimelineContent { get; init; } = string.Empty;

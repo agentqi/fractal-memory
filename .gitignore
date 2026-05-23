@@ -2,9 +2,3 @@ bin/
 obj/
 .vs/
 .DS_Store
-
-fractal-memory-bench/.venv/
-fractal-memory-bench/.pytest_cache/
-fractal-memory-bench/benchmark_runner/outputs/*
-!fractal-memory-bench/benchmark_runner/outputs/.gitkeep
-fractal-memory-bench/vendor/memorybench/.git-vendor-backup/

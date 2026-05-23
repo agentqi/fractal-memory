@@ -1,4 +1,5 @@
 using FractalMemory.Core.Application.Services;
+using FractalMemory.Core.Domain.Enums;
 
 namespace FractalMemory.Core.Infrastructure.Files;
 
@@ -156,9 +157,101 @@ public sealed class TemplateService(IFileSystemService fileSystemService) : ITem
                 """,
         };
 
-    public IReadOnlyDictionary<string, string> GetNodeTemplates(string nodeName)
+    public IReadOnlyDictionary<string, string> GetNodeTemplates(string nodeName, NodeFileFormat format = NodeFileFormat.Markdown)
     {
         var title = Humanize(nodeName);
+        if (format == NodeFileFormat.Html)
+        {
+            return new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["index.html"] = $$"""
+                    <!doctype html>
+                    <html lang="en">
+                    <head>
+                      <meta charset="utf-8">
+                      <title>{{title}}</title>
+                      <meta name="summary" content="Summary for {{title}}.">
+                    </head>
+                    <body>
+                      <h1>{{title}}</h1>
+                      <section>
+                        <h2>Summary</h2>
+                        <p>Describe the role of this node and when it should be loaded.</p>
+                      </section>
+                      <section>
+                        <h2>Suggested Reads</h2>
+                        <ul>
+                          <li><code>state.html</code></li>
+                          <li><code>timeline.html</code></li>
+                          <li><code>decisions.html</code></li>
+                        </ul>
+                      </section>
+                    </body>
+                    </html>
+                    """,
+                ["state.html"] = $$"""
+                    <!doctype html>
+                    <html lang="en">
+                    <head>
+                      <meta charset="utf-8">
+                      <title>{{title}} State</title>
+                      <meta name="summary" content="Current working truth for {{title}}.">
+                    </head>
+                    <body>
+                      <h1>Current State</h1>
+                      <section>
+                        <h2>Project / Branch</h2>
+                        <p>{{title}}</p>
+                      </section>
+                      <section>
+                        <h2>Current Objective</h2>
+                        <p>Capture what is true right now.</p>
+                      </section>
+                      <section>
+                        <h2>Active Constraints</h2>
+                        <ul><li>Add constraints, guardrails, or decisions in force.</li></ul>
+                      </section>
+                      <section>
+                        <h2>Next Best Actions</h2>
+                        <ul><li>Add the next best actions.</li></ul>
+                      </section>
+                      <section>
+                        <h2>Open Questions</h2>
+                        <ul><li>Add unresolved questions.</li></ul>
+                      </section>
+                    </body>
+                    </html>
+                    """,
+                ["timeline.html"] = $$"""
+                    <!doctype html>
+                    <html lang="en">
+                    <head>
+                      <meta charset="utf-8">
+                      <title>{{title}} Timeline</title>
+                      <meta name="summary" content="Chronological updates for {{title}}.">
+                    </head>
+                    <body>
+                      <h1>Timeline</h1>
+                      <ul><li>Add dated updates here.</li></ul>
+                    </body>
+                    </html>
+                    """,
+                ["decisions.html"] = $$"""
+                    <!doctype html>
+                    <html lang="en">
+                    <head>
+                      <meta charset="utf-8">
+                      <title>{{title}} Decisions</title>
+                      <meta name="summary" content="Important decisions for {{title}}.">
+                    </head>
+                    <body>
+                      <h1>Decisions</h1>
+                      <ul><li>Record decisions and rationale here.</li></ul>
+                    </body>
+                    </html>
+                    """,
+            };
+        }
 
         return new Dictionary<string, string>(StringComparer.Ordinal)
         {
@@ -242,13 +335,19 @@ public sealed class TemplateService(IFileSystemService fileSystemService) : ITem
     public async Task<IReadOnlyDictionary<string, string>> GetNodeTemplatesAsync(
         string repositoryRoot,
         string nodeName,
+        NodeFileFormat format,
         CancellationToken cancellationToken)
     {
         var templateRoot = Path.Combine(repositoryRoot, ".fractal-memory", "templates", "node");
+        if (format == NodeFileFormat.Html)
+        {
+            return GetNodeTemplates(nodeName, format);
+        }
+
         var templateFiles = new[] { "index.md", "state.md", "timeline.md", "decisions.md" };
         if (!templateFiles.All(file => fileSystemService.FileExists(Path.Combine(templateRoot, file))))
         {
-            return GetNodeTemplates(nodeName);
+            return GetNodeTemplates(nodeName, format);
         }
 
         var title = Humanize(nodeName);

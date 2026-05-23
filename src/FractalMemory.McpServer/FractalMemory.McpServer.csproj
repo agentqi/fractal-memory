@@ -3,8 +3,11 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net10.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
+    <AssemblyName>fractalmem-mcp</AssemblyName>
+    <PackageId>FractalMemory.McpServer</PackageId>
+    <Description>FractalMem stdio MCP server for exposing local structured memory to agent clients.</Description>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>fractalmem-mcp</ToolCommandName>
   </PropertyGroup>
 
   <ItemGroup>
@@ -14,6 +17,10 @@
 
   <ItemGroup>
     <ProjectReference Include="..\FractalMemory.Core\FractalMemory.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 
 </Project>

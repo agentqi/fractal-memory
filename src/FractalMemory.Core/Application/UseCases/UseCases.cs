@@ -15,9 +15,13 @@ public sealed class CreateNodeUseCase(
     IRepositoryService repositoryService,
     IIndexService indexService)
 {
-    public async Task<MemoryNode> ExecuteAsync(string workingDirectory, string nodePath, CancellationToken cancellationToken)
+    public async Task<MemoryNode> ExecuteAsync(
+        string workingDirectory,
+        string nodePath,
+        NodeFileFormat format,
+        CancellationToken cancellationToken)
     {
-        var node = await nodeService.CreateNodeAsync(workingDirectory, nodePath, cancellationToken);
+        var node = await nodeService.CreateNodeAsync(workingDirectory, nodePath, cancellationToken, format);
         var repositoryRoot = repositoryService.FindRepositoryRoot(workingDirectory)
             ?? throw new InvalidOperationException("No FractalMemory repository found.");
         var config = await repositoryService.LoadConfigAsync(repositoryRoot, cancellationToken);

@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "fractalmem": {
+      "command": "fractalmem-mcp",
+      "args": [],
+      "env": {
+        "FRACTALMEM_REPOSITORY_ROOT": "${workspaceFolder}"
+      }
+    }
+  }
+}

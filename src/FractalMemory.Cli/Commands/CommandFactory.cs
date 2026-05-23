@@ -27,11 +27,17 @@ public static class CommandFactory
         var node = new Command("node", "Node operations.");
         var create = new Command("create", "Create a node.");
         var nodePathArgument = new Argument<string>("path");
+        var nodeFormatOption = new Option<NodeFileFormat>("--format") { DefaultValueFactory = _ => NodeFileFormat.Markdown };
         create.Arguments.Add(nodePathArgument);
+        create.Options.Add(nodeFormatOption);
         create.SetAction((parseResult, cancellationToken) => ExecuteAsync(async () =>
         {
             var useCase = provider.GetRequiredService<CreateNodeUseCase>();
-            var result = await useCase.ExecuteAsync(Environment.CurrentDirectory, parseResult.GetRequiredValue(nodePathArgument), cancellationToken);
+            var result = await useCase.ExecuteAsync(
+                Environment.CurrentDirectory,
+                parseResult.GetRequiredValue(nodePathArgument),
+                parseResult.GetValue(nodeFormatOption),
+                cancellationToken);
             Console.WriteLine(formatter.FormatNodeCreated(result));
         }));
         node.Subcommands.Add(create);

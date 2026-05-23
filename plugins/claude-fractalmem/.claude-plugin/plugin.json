@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "fractalmem",
+  "displayName": "FractalMem",
+  "version": "0.1.0",
+  "description": "Use FractalMem local-first structured memory from Claude Code through MCP tools, skills, and slash commands.",
+  "author": {
+    "name": "AgentQI",
+    "url": "https://github.com/agentqi"
+  },
+  "homepage": "https://github.com/agentqi/fractal-memory",
+  "repository": "https://github.com/agentqi/fractal-memory",
+  "license": "Apache-2.0",
+  "keywords": [
+    "memory",
+    "mcp",
+    "claude-code",
+    "local-first",
+    "handoff"
+  ],
+  "skills": "./skills/",
+  "commands": "./commands/",
+  "mcpServers": "./.mcp.json"
+}

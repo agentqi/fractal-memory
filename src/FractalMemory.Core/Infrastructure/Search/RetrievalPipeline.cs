@@ -157,10 +157,10 @@ internal static class RetrievalPipeline
         var title = node.Metadata.Title ?? Path.GetFileName(node.RelativePath);
         var evidence = new List<SearchResult>();
 
-        AddEvidence(evidence, node, title, "state.md", node.StateContent, "Current State", 320, maxSnippetLines);
-        AddEvidence(evidence, node, title, "decisions.md", node.DecisionsContent, "Decisions", 280, maxSnippetLines);
-        AddEvidence(evidence, node, title, "index.md", node.IndexContent, "Summary", 220, maxSnippetLines);
-        AddEvidence(evidence, node, title, "timeline.md", node.TimelineContent, "Timeline", 180, maxSnippetLines);
+        AddEvidence(evidence, node, title, node.StateFileName, node.StateContent, "Current State", 320, maxSnippetLines);
+        AddEvidence(evidence, node, title, node.DecisionsFileName, node.DecisionsContent, "Decisions", 280, maxSnippetLines);
+        AddEvidence(evidence, node, title, node.IndexFileName, node.IndexContent, "Summary", 220, maxSnippetLines);
+        AddEvidence(evidence, node, title, node.TimelineFileName, node.TimelineContent, "Timeline", 180, maxSnippetLines);
 
         return evidence
             .OrderByDescending(item => item.Score)
@@ -268,12 +268,12 @@ internal static class RetrievalPipeline
             breakdown["path_prior"] = 80;
         }
 
-        var filePrior = fileName switch
+        var filePrior = Path.GetFileNameWithoutExtension(fileName) switch
         {
-            "state.md" => 160,
-            "decisions.md" => 140,
-            "index.md" => 110,
-            "timeline.md" => 70,
+            "state" => 160,
+            "decisions" => 140,
+            "index" => 110,
+            "timeline" => 70,
             _ when fileName.StartsWith("artifacts/", StringComparison.Ordinal) => 40,
             _ => 0,
         };
