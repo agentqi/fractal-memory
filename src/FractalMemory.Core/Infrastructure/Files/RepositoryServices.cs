@@ -234,7 +234,6 @@ public sealed class NodeService(
             .Where(path => !string.IsNullOrWhiteSpace(path))
             .Cast<string>()
             .Distinct(StringComparer.Ordinal)
-            .Where(path => HasNodeFile(path, "state"))
             .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}templates{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
                 && !path.Contains($"{Path.DirectorySeparatorChar}archive{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
             .ToArray();
@@ -313,8 +312,7 @@ public sealed class NodeService(
         var children = new List<MemoryNode>();
         foreach (var childDirectory in fileSystemService.EnumerateDirectories(childrenDirectory))
         {
-            if (!HasNodeFile(childDirectory, "index") ||
-                !HasNodeFile(childDirectory, "state"))
+            if (!HasNodeFile(childDirectory, "index"))
             {
                 continue;
             }
@@ -339,12 +337,13 @@ public sealed class NodeService(
         var topLevel = SnapshotTopLevelFiles(fullPath);
         var indexPath = ResolveFromSnapshot(topLevel, fullPath, "index")
             ?? throw new InvalidOperationException($"Node '{normalizedPath}' is missing index.md or index.html.");
-        var statePath = ResolveFromSnapshot(topLevel, fullPath, "state")
-            ?? throw new InvalidOperationException($"Node '{normalizedPath}' is missing state.md or state.html.");
+        var statePath = ResolveFromSnapshot(topLevel, fullPath, "state");
         var timelinePath = ResolveFromSnapshot(topLevel, fullPath, "timeline");
         var decisionsPath = ResolveFromSnapshot(topLevel, fullPath, "decisions");
         var index = await ReadNodeDocumentAsync(indexPath, cancellationToken);
-        var state = await ReadNodeDocumentAsync(statePath, cancellationToken);
+        var state = statePath is not null
+            ? await ReadNodeDocumentAsync(statePath, cancellationToken)
+            : new ParsedMarkdownDocument { Metadata = new NodeMetadata(), Content = string.Empty };
         var timeline = timelinePath is not null
             ? await ReadNodeDocumentAsync(timelinePath, cancellationToken)
             : new ParsedMarkdownDocument { Metadata = new NodeMetadata(), Content = string.Empty };
@@ -358,7 +357,7 @@ public sealed class NodeService(
             FullPath = fullPath,
             Metadata = MergeMetadata(index.Metadata, state.Metadata),
             IndexFileName = Path.GetFileName(indexPath),
-            StateFileName = Path.GetFileName(statePath),
+            StateFileName = statePath is null ? "state.md" : Path.GetFileName(statePath),
             TimelineFileName = timelinePath is null ? "timeline.md" : Path.GetFileName(timelinePath),
             DecisionsFileName = decisionsPath is null ? "decisions.md" : Path.GetFileName(decisionsPath),
             IndexContent = index.Content,
@@ -767,10 +766,12 @@ public sealed class HandoffService(
 
 public sealed class ValidationService(
     IRepositoryService repositoryService,
-    INodeService nodeService,
     IFileSystemService fileSystemService,
     IMarkdownFileService markdownFileService) : IValidationService
 {
+    private static readonly string[] NodeContractFileNames = ["index", "state", "timeline", "decisions"];
+    private static readonly string[] NodeFileExtensions = [".md", ".html", ".htm"];
+
     public async Task<ValidationReport> ValidateAsync(string workingDirectory, CancellationToken cancellationToken)
     {
         var repositoryRoot = repositoryService.FindRepositoryRoot(workingDirectory)
@@ -778,18 +779,21 @@ public sealed class ValidationService(
         var config = await repositoryService.LoadConfigAsync(repositoryRoot, cancellationToken);
         var issues = new List<ValidationIssue>();
         var storageRoot = repositoryService.GetStorageRoot(repositoryRoot);
-        var candidateDirectories = EnumerateMemoryFiles(storageRoot)
-            .Select(Path.GetDirectoryName)
-            .Where(path => !string.IsNullOrWhiteSpace(path))
-            .Cast<string>()
-            .Distinct(StringComparer.Ordinal)
-            .Where(path =>
-                ResolveNodeFile(path, "index") is not null ||
-                ResolveNodeFile(path, "state") is not null)
-            .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}templates{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+        var memoryFiles = EnumerateMemoryFiles(storageRoot)
+            .Where(path => !IsIgnoredValidationPath(storageRoot, path))
+            .ToArray();
+        var filesByDirectory = memoryFiles
+            .GroupBy(path => Path.GetDirectoryName(path), StringComparer.Ordinal)
+            .Where(group => !string.IsNullOrWhiteSpace(group.Key))
+            .ToDictionary(
+                group => group.Key!,
+                group => BuildNodeFileMap(group),
+                StringComparer.Ordinal);
+        var candidateDirectories = filesByDirectory
+            .Where(pair => pair.Value.ContainsKey("index") || pair.Value.ContainsKey("state"))
+            .Select(pair => pair.Key)
             .ToArray();
 
-        var nodes = await nodeService.GetAllNodesAsync(repositoryRoot, cancellationToken);
         foreach (var directory in candidateDirectories)
         {
             var relativePath = Path.GetRelativePath(storageRoot, directory).Replace(Path.DirectorySeparatorChar, '/');
@@ -802,8 +806,11 @@ public sealed class ValidationService(
                 issues.Add(new ValidationIssue { Severity = ValidationSeverity.Error, RelativePath = relativePath, Message = exception.Message });
             }
 
-            var indexPath = ResolveNodeFile(directory, "index");
-            var statePath = ResolveNodeFile(directory, "state");
+            var nodeFiles = filesByDirectory[directory];
+            nodeFiles.TryGetValue("index", out var indexPath);
+            nodeFiles.TryGetValue("state", out var statePath);
+            nodeFiles.TryGetValue("timeline", out var timelinePath);
+            nodeFiles.TryGetValue("decisions", out var decisionsPath);
             if (config.Validation.RequireIndex && indexPath is null)
             {
                 issues.Add(new ValidationIssue { Severity = ValidationSeverity.Error, RelativePath = relativePath, Message = "Missing required index.md or index.html." });
@@ -815,11 +822,12 @@ public sealed class ValidationService(
                 {
                     Severity = ValidationSeverity.Error,
                     RelativePath = relativePath,
-                    Message = "Missing required state.md or state.html. Search and listings ignore index-only nodes until state is present.",
+                    Message = "Missing required state.md or state.html. Search and listings will include the node with empty state until state is present.",
                 });
             }
 
-            foreach (var memoryFile in new[] { indexPath, statePath, ResolveNodeFile(directory, "timeline"), ResolveNodeFile(directory, "decisions") })
+            ParsedMarkdownDocument? parsedIndex = null;
+            foreach (var memoryFile in new[] { indexPath, statePath, timelinePath, decisionsPath })
             {
                 if (memoryFile is null)
                 {
@@ -829,6 +837,11 @@ public sealed class ValidationService(
                 try
                 {
                     var document = await ReadMemoryFileAsync(memoryFile, cancellationToken);
+                    if (string.Equals(memoryFile, indexPath, StringComparison.Ordinal))
+                    {
+                        parsedIndex = document;
+                    }
+
                     if (Path.GetFileNameWithoutExtension(memoryFile).Equals("state", StringComparison.Ordinal) && string.IsNullOrWhiteSpace(document.Content))
                     {
                         issues.Add(new ValidationIssue { Severity = ValidationSeverity.Warning, RelativePath = relativePath, Message = $"{Path.GetFileName(memoryFile)} is empty." });
@@ -854,7 +867,7 @@ public sealed class ValidationService(
             {
                 try
                 {
-                    var indexDocument = await ReadMemoryFileAsync(indexPath, cancellationToken);
+                    var indexDocument = parsedIndex ?? await ReadMemoryFileAsync(indexPath, cancellationToken);
                     var referencedChildren = Regex.Matches(indexDocument.Content, @"children/([a-z0-9/-]+)")
                         .Select(match => match.Groups[1].Value)
                         .Distinct(StringComparer.Ordinal);
@@ -879,7 +892,9 @@ public sealed class ValidationService(
             }
         }
 
-        var duplicates = nodes.GroupBy(node => node.RelativePath.ToLowerInvariant())
+        var duplicates = candidateDirectories
+            .Select(directory => Path.GetRelativePath(storageRoot, directory).Replace(Path.DirectorySeparatorChar, '/'))
+            .GroupBy(path => path.ToLowerInvariant())
             .Where(group => group.Count() > 1);
         foreach (var duplicate in duplicates)
         {
@@ -891,8 +906,7 @@ public sealed class ValidationService(
             });
         }
 
-        var latestNodeWrite = EnumerateMemoryFiles(storageRoot)
-            .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}templates{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+        var latestNodeWrite = memoryFiles
             .Select(fileSystemService.GetLastWriteTimeUtc)
             .DefaultIfEmpty(DateTimeOffset.MinValue)
             .Max();
@@ -925,18 +939,34 @@ public sealed class ValidationService(
         }
     }
 
-    private string? ResolveNodeFile(string directory, string baseName)
+    private static bool IsIgnoredValidationPath(string storageRoot, string path)
     {
-        foreach (var extension in new[] { ".md", ".html", ".htm" })
+        var relative = Path.GetRelativePath(storageRoot, path).Replace(Path.DirectorySeparatorChar, '/');
+        return relative.StartsWith("templates/", StringComparison.Ordinal) ||
+            relative.StartsWith("handoffs/", StringComparison.Ordinal) ||
+            relative.StartsWith("indexes/", StringComparison.Ordinal) ||
+            relative.Contains("/artifacts/", StringComparison.Ordinal);
+    }
+
+    private static Dictionary<string, string> BuildNodeFileMap(IEnumerable<string> files)
+    {
+        var candidates = files.ToArray();
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var baseName in NodeContractFileNames)
         {
-            var path = Path.Combine(directory, baseName + extension);
-            if (fileSystemService.FileExists(path))
+            foreach (var extension in NodeFileExtensions)
             {
-                return path;
+                var match = candidates.FirstOrDefault(path =>
+                    Path.GetFileName(path).Equals(baseName + extension, StringComparison.OrdinalIgnoreCase));
+                if (match is not null)
+                {
+                    map[baseName] = match;
+                    break;
+                }
             }
         }
 
-        return null;
+        return map;
     }
 
     private async Task<ParsedMarkdownDocument> ReadMemoryFileAsync(string path, CancellationToken cancellationToken)

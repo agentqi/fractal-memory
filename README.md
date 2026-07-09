@@ -179,7 +179,7 @@ Each created node contains:
 - `init` creates the repository, config, templates, root files, and index stubs.
 - `node create` normalizes and validates the path, creates the standard node contract as markdown or HTML, and refreshes indexes when indexing is enabled.
 - `open` supports layered retrieval with depth `0..3` and optional focused views.
-- `search` ranks exact path, title, alias, tag, then markdown content matches.
+- `search` ranks exact path, title, alias, tag, then markdown content matches, with optional path scoping.
 - `export` emits AI-friendly structured output with stable source labels.
 - `handoff create` writes resumable handoff markdown into `.fractal-memory/handoffs/`.
 - `recent` surfaces recently modified nodes for work resumption.
@@ -210,7 +210,7 @@ dotnet run --project /Users/telli/Desktop/fm\ cli/src/FractalMemory.McpServer
 Tools:
 
 - `memory_open(path, depth?, view?)`
-- `memory_search(query, limit?)`
+- `memory_search(query, limit?, scope?)`
 - `memory_recent(days?, limit?, scope?)`
 - `memory_export(path, mode?)`
 - `memory_handoff_create(path)`

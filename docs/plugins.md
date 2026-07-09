@@ -34,5 +34,5 @@ It contributes:
 
 - MCP server config
 - FractalMem usage skill
-- slash commands for opening, searching, exporting, and handoff creation
+- slash commands for opening, searching, recent activity, exporting, handoff creation, validation, and index refresh
 - marketplace entry in `.claude-plugin/marketplace.json`

@@ -12,6 +12,14 @@
       "source": "./plugins/claude-fractalmem",
       "description": "Use FractalMem local markdown memory through MCP tools and Claude Code commands.",
       "version": "0.1.0",
+      "homepage": "https://github.com/agentqi/fractal-memory",
+      "keywords": [
+        "memory",
+        "mcp",
+        "claude-code",
+        "local-first",
+        "handoff"
+      ],
       "author": {
         "name": "AgentQI"
       }

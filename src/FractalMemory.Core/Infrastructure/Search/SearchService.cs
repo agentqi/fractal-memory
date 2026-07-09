@@ -1,6 +1,7 @@
 using FractalMemory.Core.Application.Services;
 using FractalMemory.Core.Domain.Models;
 using FractalMemory.Core.Infrastructure.Parsing;
+using YamlDotNet.Serialization;
 
 namespace FractalMemory.Core.Infrastructure.Search;
 
@@ -10,6 +11,9 @@ public sealed class SearchService(
     IFileSystemService fileSystemService,
     IClock clock) : ISearchService
 {
+    private static readonly IDeserializer PathIndexDeserializer = new DeserializerBuilder().Build();
+    private static readonly string[] NodeContractFileNames = ["index", "state", "timeline", "decisions"];
+
     public async Task<IReadOnlyList<SearchResult>> SearchAsync(string workingDirectory, string query, CancellationToken cancellationToken, int? limit = null, string? scope = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(query);
@@ -68,36 +72,54 @@ public sealed class SearchService(
     {
         var repositoryRoot = repositoryService.FindRepositoryRoot(workingDirectory)
             ?? throw new InvalidOperationException("No FractalMemory repository found.");
+        var storageRoot = repositoryService.GetStorageRoot(repositoryRoot);
         var cutoff = clock.UtcNow.AddDays(-days);
-        var nodes = await nodeService.GetAllNodesAsync(repositoryRoot, cancellationToken);
-
         var normalizedScope = NormalizeScope(scope);
-        var items = nodes
-            .Where(node => normalizedScope is null || MatchesScope(node.RelativePath, normalizedScope))
-            .Select(node =>
-            {
-                var files = new[] { node.IndexFileName, node.StateFileName, node.TimelineFileName, node.DecisionsFileName }
-                    .Select(file => Path.Combine(node.FullPath, file))
-                    .Where(fileSystemService.FileExists)
-                    .Select(path => new { Path = path, LastModified = fileSystemService.GetLastWriteTimeUtc(path) })
-                    .OrderByDescending(item => item.LastModified)
-                    .First();
+        var pathTitles = await LoadPathTitlesAsync(storageRoot, cancellationToken);
+        var latestByNode = new Dictionary<string, RecentNodeFile>(StringComparer.Ordinal);
 
-                return new RecentItem
-                {
-                    RelativePath = node.RelativePath,
-                    Title = node.Metadata.Title ?? Path.GetFileName(node.RelativePath),
-                    FileName = Path.GetFileName(files.Path),
-                    LastModified = files.LastModified,
-                };
-            })
+        foreach (var file in EnumerateRecentNodeFiles(storageRoot))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var directory = Path.GetDirectoryName(file);
+            if (string.IsNullOrWhiteSpace(directory))
+            {
+                continue;
+            }
+
+            var relativePath = Path.GetRelativePath(storageRoot, directory).Replace(Path.DirectorySeparatorChar, '/');
+            if (normalizedScope is not null && !MatchesScope(relativePath, normalizedScope))
+            {
+                continue;
+            }
+
+            var lastModified = fileSystemService.GetLastWriteTimeUtc(file);
+            var candidate = new RecentNodeFile(relativePath, Path.GetFileName(file), lastModified);
+            if (!latestByNode.TryGetValue(relativePath, out var current) || candidate.LastModified > current.LastModified)
+            {
+                latestByNode[relativePath] = candidate;
+            }
+        }
+
+        var items = latestByNode.Values
             .Where(item => item.LastModified >= cutoff)
             .OrderByDescending(item => item.LastModified)
             .Take(limit)
+            .Select(item => new RecentItem
+            {
+                RelativePath = item.RelativePath,
+                Title = pathTitles.TryGetValue(item.RelativePath, out var title) && !string.IsNullOrWhiteSpace(title)
+                    ? title
+                    : Path.GetFileName(item.RelativePath),
+                FileName = item.FileName,
+                LastModified = item.LastModified,
+            })
             .ToArray();
 
         return items;
     }
+
+    private sealed record RecentNodeFile(string RelativePath, string FileName, DateTimeOffset LastModified);
 
     private async Task<SearchResult?> ScoreNodeAsync(
         MemoryNode node,
@@ -250,6 +272,58 @@ public sealed class SearchService(
         return extension.Equals(".md", StringComparison.OrdinalIgnoreCase) ||
             extension.Equals(".html", StringComparison.OrdinalIgnoreCase) ||
             extension.Equals(".htm", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task<IReadOnlyDictionary<string, string>> LoadPathTitlesAsync(string storageRoot, CancellationToken cancellationToken)
+    {
+        var pathsIndex = Path.Combine(storageRoot, "indexes", "paths.yaml");
+        if (!fileSystemService.FileExists(pathsIndex))
+        {
+            return new Dictionary<string, string>(StringComparer.Ordinal);
+        }
+
+        try
+        {
+            var yaml = await fileSystemService.ReadAllTextAsync(pathsIndex, cancellationToken);
+            var parsed = PathIndexDeserializer.Deserialize<Dictionary<string, string>>(yaml);
+            return parsed is null
+                ? new Dictionary<string, string>(StringComparer.Ordinal)
+                : new Dictionary<string, string>(parsed, StringComparer.Ordinal);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            return new Dictionary<string, string>(StringComparer.Ordinal);
+        }
+    }
+
+    private IEnumerable<string> EnumerateRecentNodeFiles(string storageRoot)
+    {
+        foreach (var path in fileSystemService.EnumerateFiles(storageRoot, "*", SearchOption.AllDirectories))
+        {
+            if (!IsSearchableArtifact(path) || IsExcludedMemoryPath(storageRoot, path))
+            {
+                continue;
+            }
+
+            if (NodeContractFileNames.Contains(Path.GetFileNameWithoutExtension(path), StringComparer.OrdinalIgnoreCase))
+            {
+                yield return path;
+            }
+        }
+    }
+
+    private static bool IsExcludedMemoryPath(string storageRoot, string path)
+    {
+        var relative = Path.GetRelativePath(storageRoot, path).Replace(Path.DirectorySeparatorChar, '/');
+        return relative.StartsWith("templates/", StringComparison.Ordinal) ||
+            relative.StartsWith("archive/", StringComparison.Ordinal) ||
+            relative.StartsWith("handoffs/", StringComparison.Ordinal) ||
+            relative.StartsWith("indexes/", StringComparison.Ordinal) ||
+            relative.Contains("/artifacts/", StringComparison.Ordinal);
     }
 
     private static async Task<string> ReadArtifactContentAsync(

@@ -687,6 +687,40 @@ public sealed class RetrievalAndSchemaTests
     }
 
     [Fact]
+    public async Task SearchIncludesIndexOnlyNodesWhileValidationStillReportsMissingState()
+    {
+        using var provider = TestEnvironment.CreateServices();
+        var repositoryService = provider.GetRequiredService<IRepositoryService>();
+        var nodeService = provider.GetRequiredService<INodeService>();
+        var searchService = provider.GetRequiredService<ISearchService>();
+        var validationService = provider.GetRequiredService<IValidationService>();
+        var temp = TestEnvironment.CreateTempDirectory();
+
+        await repositoryService.InitializeAsync(temp, CancellationToken.None);
+        await nodeService.CreateNodeAsync(temp, "projects/index-only", CancellationToken.None);
+        var nodeRoot = Path.Combine(temp, ".fractal-memory", "projects", "index-only");
+        File.Delete(Path.Combine(nodeRoot, "state.md"));
+        await File.WriteAllTextAsync(Path.Combine(nodeRoot, "index.md"), """
+            ---
+            title: Index Only Node
+            summary: Search-visible node without state.
+            ---
+
+            ## Summary
+
+            Index-only visibility regression marker.
+            """);
+
+        var results = await searchService.SearchAsync(temp, "index-only visibility regression marker", CancellationToken.None);
+        var validation = await validationService.ValidateAsync(temp, CancellationToken.None);
+
+        Assert.Contains(results, item => item.RelativePath == "projects/index-only");
+        Assert.Contains(validation.Issues, issue =>
+            issue.RelativePath == "projects/index-only" &&
+            issue.Message.Contains("Missing required state", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void YamlFrontMatterQuotesReservedLiteralsAndNumericStrings()
     {
         var metadata = new NodeMetadata

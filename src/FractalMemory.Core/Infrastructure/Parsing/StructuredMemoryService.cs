@@ -46,7 +46,7 @@ public sealed partial class StructuredMemoryService : IStructuredMemoryService
             KeyDecisionsInForce = ListValue(sections, "key_decisions"),
             ActiveConstraints = ListValue(sections, "active_constraints").Count > 0
                 ? ListValue(sections, "active_constraints")
-                : ExtractConstraintLines(markdown),
+                : ExtractPotentialConstraintLines(markdown),
             NextBestActions = ListValue(sections, "next_best_actions"),
             OpenQuestions = ListValue(sections, "open_questions").Count > 0
                 ? ListValue(sections, "open_questions")
@@ -88,7 +88,7 @@ public sealed partial class StructuredMemoryService : IStructuredMemoryService
 
         var activeConstraints = parsedState.ActiveConstraints.Count > 0
             ? parsedState.ActiveConstraints
-            : ExtractConstraintLines(node.StateContent);
+            : ExtractPotentialConstraintLines(node.StateContent);
 
         var nextActions = parsedState.NextBestActions.Count > 0
             ? parsedState.NextBestActions
@@ -209,7 +209,7 @@ public sealed partial class StructuredMemoryService : IStructuredMemoryService
             .Distinct(StringComparer.Ordinal)
             .ToArray();
 
-    private static IReadOnlyList<string> ExtractConstraintLines(string markdown) =>
+    private static IReadOnlyList<string> ExtractPotentialConstraintLines(string markdown) =>
         NormalizeLineEndings(markdown)
             .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Select(CleanListPrefix)
