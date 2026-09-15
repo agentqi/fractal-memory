@@ -18,7 +18,8 @@ public interface INodeService
         string workingDirectory,
         string nodePath,
         CancellationToken cancellationToken,
-        NodeFileFormat format = NodeFileFormat.Markdown);
+        NodeFileFormat format = NodeFileFormat.Markdown,
+        IReadOnlyDictionary<string, string>? documents = null);
     Task<MemoryNode> GetNodeAsync(string workingDirectory, string nodePath, CancellationToken cancellationToken);
     Task<IReadOnlyList<MemoryNode>> GetAllNodesAsync(
         string repositoryRoot, CancellationToken cancellationToken, bool bypassCache = false, string? scope = null);

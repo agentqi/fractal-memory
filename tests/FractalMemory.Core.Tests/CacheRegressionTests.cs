@@ -28,7 +28,7 @@ public sealed class CacheRegressionTests
         Assert.Equal("Test", Assert.Single(await cold.GetRequiredService<ISearchService>()
             .SearchAsync(repository.Root, "projects/test", repository.Token)).Title);
         await cold.GetRequiredService<IIndexService>().RefreshAsync(repository.Root, repository.Token);
-        Assert.Equal(2, JsonNode.Parse(await repository.ReadAsync("indexes/cache/manifest.json"))!["FormatVersion"]!.GetValue<int>());
+        Assert.Equal(3, JsonNode.Parse(await repository.ReadAsync("indexes/cache/manifest.json"))!["FormatVersion"]!.GetValue<int>());
     }
 
     [Fact]

@@ -35,9 +35,6 @@ internal static partial class RetrievalPipeline
         "was", "were", "have", "has", "had", "into", "onto", "about", "them", "they", "then", "show", "only", "latest",
     };
 
-    [GeneratedRegex(@"^\s{0,3}#{1,6}\s+(.*)$")]
-    private static partial Regex HeadingRegex();
-
     [GeneratedRegex(
         @"\b(?:" +
             @"\d{4}-\d{1,2}-\d{1,2}" +
@@ -90,39 +87,8 @@ internal static partial class RetrievalPipeline
 
     public static IReadOnlyList<MarkdownSection> ParseSections(string markdown)
     {
-        var normalized = NormalizeLineEndings(markdown);
-        var lines = normalized.Split('\n');
-        var sections = new List<MarkdownSection>();
-        string currentHeading = "Document";
-        var currentStart = 1;
-        var buffer = new List<string>();
-
-        for (var index = 0; index < lines.Length; index++)
-        {
-            var line = lines[index];
-            var match = HeadingRegex().Match(line);
-            if (match.Success)
-            {
-                if (buffer.Count > 0)
-                {
-                    sections.Add(new MarkdownSection(currentHeading, currentStart, index, buffer.ToArray()));
-                }
-
-                currentHeading = match.Groups[1].Value.Trim();
-                currentStart = index + 2;
-                buffer = new List<string>();
-                continue;
-            }
-
-            buffer.Add(line);
-        }
-
-        if (buffer.Count > 0)
-        {
-            sections.Add(new MarkdownSection(currentHeading, currentStart, lines.Length, buffer.ToArray()));
-        }
-
-        return sections;
+        return FractalMemory.Core.Infrastructure.Parsing.MemoryMarkdown.Sections(markdown)
+            .Select(section => new MarkdownSection(section.Title, section.StartLine, section.EndLine, section.Content.Split('\n'))).ToArray();
     }
 
     public static IReadOnlyList<SnippetCandidate> BuildSearchCandidates(

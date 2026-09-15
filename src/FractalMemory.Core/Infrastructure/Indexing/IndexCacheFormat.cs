@@ -4,7 +4,7 @@ namespace FractalMemory.Core.Infrastructure.Indexing;
 
 internal sealed class IndexCacheManifest
 {
-    public const int CurrentFormatVersion = 2;
+    public const int CurrentFormatVersion = 3;
     public int FormatVersion { get; set; }
     public DateTimeOffset RefreshedAt { get; set; }
     public string Fingerprint { get; set; } = string.Empty;

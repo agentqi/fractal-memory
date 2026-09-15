@@ -6,9 +6,6 @@ namespace FractalMemory.Core.Infrastructure.Parsing;
 
 public sealed partial class StructuredMemoryService : IStructuredMemoryService
 {
-    [GeneratedRegex(@"^\s{0,3}#{1,6}\s+(.*)$")]
-    private static partial Regex HeadingRegex();
-
     [GeneratedRegex(@"[^a-z0-9/ ]")]
     private static partial Regex NormalizeHeadingRegex();
 
@@ -38,11 +35,12 @@ public sealed partial class StructuredMemoryService : IStructuredMemoryService
 
     public StructuredMemoryFields Parse(string markdown, string fallbackProjectBranch)
     {
+        markdown = MemoryMarkdown.Knowledge(markdown);
         var sections = ParseSections(markdown);
         var fields = new StructuredMemoryFields
         {
             ProjectBranch = FirstValue(sections, "project_branch") ?? fallbackProjectBranch,
-            CurrentObjective = FirstValue(sections, "current_objective") ?? FallbackObjective(markdown),
+            CurrentObjective = FirstValue(sections, "current_objective") ?? (MemoryMarkdown.Headings(markdown).Any(h => NormalizeHeading(h.Title) == "current_objective") ? null : FallbackObjective(markdown)),
             KeyDecisionsInForce = ListValue(sections, "key_decisions"),
             ActiveConstraints = ListValue(sections, "active_constraints").Count > 0
                 ? ListValue(sections, "active_constraints")
@@ -80,15 +78,18 @@ public sealed partial class StructuredMemoryService : IStructuredMemoryService
             .DistinctBy(source => $"{source.SourcePath}|{source.SectionHeading}|{source.Excerpt}")
             .ToArray();
 
-        var keyDecisions = parsedState.KeyDecisionsInForce.Count > 0
+        var managedDecisions = DecisionLog.Parse(node.DecisionsContent);
+        var keyDecisions = managedDecisions.Count > 0
+            ? managedDecisions.Where(d => d.Status == "active").Select(d => d.Content).ToArray()
+            : parsedState.KeyDecisionsInForce.Count > 0
             ? parsedState.KeyDecisionsInForce
             : parsedDecisions.KeyDecisionsInForce.Count > 0
                 ? parsedDecisions.KeyDecisionsInForce
-                : ExtractBulletLines(node.DecisionsContent, 4);
+                : ExtractBulletLines(MemoryMarkdown.Knowledge(node.DecisionsContent), 4);
 
         var activeConstraints = parsedState.ActiveConstraints.Count > 0
             ? parsedState.ActiveConstraints
-            : ExtractPotentialConstraintLines(node.StateContent);
+            : ExtractPotentialConstraintLines(MemoryMarkdown.Knowledge(node.StateContent));
 
         var nextActions = parsedState.NextBestActions.Count > 0
             ? parsedState.NextBestActions
@@ -118,7 +119,7 @@ public sealed partial class StructuredMemoryService : IStructuredMemoryService
         return new AnswerContextPacket
         {
             ProjectBranch = parsedState.ProjectBranch ?? node.RelativePath,
-            CurrentObjective = parsedState.CurrentObjective ?? node.Metadata.Summary,
+            CurrentObjective = parsedState.CurrentObjective,
             KeyPriorDecisions = keyDecisions,
             ActiveConstraints = activeConstraints,
             NextBestActions = nextActions,
@@ -131,27 +132,8 @@ public sealed partial class StructuredMemoryService : IStructuredMemoryService
     private static Dictionary<string, List<string>> ParseSections(string markdown)
     {
         var sections = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
-        string? currentKey = null;
-        var currentLines = new List<string>();
-
-        foreach (var line in NormalizeLineEndings(markdown).Split('\n'))
-        {
-            var headingMatch = HeadingRegex().Match(line);
-            if (headingMatch.Success)
-            {
-                FlushSection(sections, currentKey, currentLines);
-                currentKey = NormalizeHeading(headingMatch.Groups[1].Value);
-                currentLines = new List<string>();
-                continue;
-            }
-
-            if (currentKey is not null)
-            {
-                currentLines.Add(line);
-            }
-        }
-
-        FlushSection(sections, currentKey, currentLines);
+        foreach (var section in MemoryMarkdown.Sections(markdown))
+            FlushSection(sections, NormalizeHeading(section.Title), section.Content.Split('\n').ToList());
         return sections;
     }
 
@@ -213,6 +195,7 @@ public sealed partial class StructuredMemoryService : IStructuredMemoryService
         NormalizeLineEndings(markdown)
             .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Select(CleanListPrefix)
+            .Where(line => !line.StartsWith('#'))
             .Where(line =>
                 line.Contains("constraint", StringComparison.OrdinalIgnoreCase) ||
                 line.Contains("must ", StringComparison.OrdinalIgnoreCase) ||

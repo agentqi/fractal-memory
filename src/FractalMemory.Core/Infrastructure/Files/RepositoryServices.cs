@@ -118,7 +118,10 @@ public sealed class RepositoryService(
         var storageRoot = GetStorageRoot(repositoryRoot);
         var configPath = RepositoryPathGuard.ResolveContainedPath(storageRoot, "config.yaml");
         var yaml = await fileSystemService.ReadAllTextAsync(configPath, cancellationToken);
-        var data = ConfigDeserializer.Deserialize<Dictionary<object, object?>>(yaml) ?? [];
+        Dictionary<object, object?> data;
+        try { data = ConfigDeserializer.Deserialize<Dictionary<object, object?>>(yaml) ?? []; }
+        catch (YamlDotNet.Core.YamlException exception)
+        { throw new InvalidOperationException($"Malformed config.yaml: {exception.Message}", exception); }
 
         var defaultDepthValue = GetInt(data, "default_depth") ?? (int)RetrievalDepth.Orientation;
         if (!Enum.IsDefined(typeof(RetrievalDepth), defaultDepthValue))
@@ -180,17 +183,30 @@ public sealed class RepositoryService(
     public string GetStorageRoot(string repositoryRoot) =>
         RepositoryPathGuard.ResolveContainedPath(repositoryRoot, ".fractal-memory");
 
-    private static IReadOnlyDictionary<object, object?>? GetSection(IReadOnlyDictionary<object, object?> source, string key) =>
-        source.TryGetValue(key, out var section) ? section as IReadOnlyDictionary<object, object?> : null;
+    private static IReadOnlyDictionary<object, object?>? GetSection(IReadOnlyDictionary<object, object?> source, string key)
+    {
+        if (!source.TryGetValue(key, out var section)) return null;
+        return section as IReadOnlyDictionary<object, object?>
+            ?? throw new InvalidOperationException($"Configuration section '{key}' must be a mapping.");
+    }
 
     private static string? GetString(IReadOnlyDictionary<object, object?> source, string key) =>
         source.TryGetValue(key, out var value) ? value?.ToString() : null;
 
-    private static bool? GetBool(IReadOnlyDictionary<object, object?> source, string key) =>
-        source.TryGetValue(key, out var value) && bool.TryParse(value?.ToString(), out var parsed) ? parsed : null;
+    private static bool? GetBool(IReadOnlyDictionary<object, object?> source, string key)
+    {
+        if (!source.TryGetValue(key, out var value)) return null;
+        return bool.TryParse(value?.ToString(), out var parsed) ? parsed
+            : throw new InvalidOperationException($"Configuration value '{key}' must be true or false.");
+    }
 
-    private static int? GetInt(IReadOnlyDictionary<object, object?> source, string key) =>
-        source.TryGetValue(key, out var value) && int.TryParse(value?.ToString(), out var parsed) ? parsed : null;
+    private static int? GetInt(IReadOnlyDictionary<object, object?> source, string key)
+    {
+        if (!source.TryGetValue(key, out var value)) return null;
+        return int.TryParse(value?.ToString(), out var parsed) ? parsed
+            : throw new InvalidOperationException($"Configuration value '{key}' must be an integer.");
+    }
+
 }
 
 public sealed class NodeService(
@@ -210,7 +226,8 @@ public sealed class NodeService(
         string workingDirectory,
         string nodePath,
         CancellationToken cancellationToken,
-        NodeFileFormat format = NodeFileFormat.Markdown)
+        NodeFileFormat format = NodeFileFormat.Markdown,
+        IReadOnlyDictionary<string, string>? documents = null)
     {
         if (!Enum.IsDefined(format))
         {
@@ -235,6 +252,15 @@ public sealed class NodeService(
             format,
             config.Metadata.FrontMatter,
             cancellationToken);
+        if (documents is not null && format != NodeFileFormat.Markdown)
+            throw new ArgumentException("Imported document overrides require Markdown node templates.");
+        var allDocuments = new Dictionary<string, string>(templates, StringComparer.Ordinal);
+        foreach (var document in documents ?? new Dictionary<string, string>())
+        {
+            if (document.Key != "index.md" && !Regex.IsMatch(document.Key, @"^artifacts/source\.(md|html|htm|txt)$"))
+                throw new ArgumentException("Creation overrides support index.md and artifacts/source documents only.");
+            allDocuments[document.Key] = document.Value;
+        }
         var stagingRelativePath = $".staging/{Guid.NewGuid():N}";
         var stagingPath = RepositoryPathGuard.ResolveContainedPath(storageRoot, stagingRelativePath);
         try
@@ -242,10 +268,10 @@ public sealed class NodeService(
             fileSystemService.CreateDirectory(stagingPath);
             fileSystemService.CreateDirectory(Path.Combine(stagingPath, "children"));
             fileSystemService.CreateDirectory(Path.Combine(stagingPath, "artifacts"));
-            foreach (var template in templates)
+            foreach (var template in allDocuments)
             {
                 var destination = RepositoryPathGuard.ResolveContainedPath(stagingPath, template.Key);
-                await fileSystemService.WriteAllTextAsync(destination, template.Value + Environment.NewLine, cancellationToken);
+                await fileSystemService.WriteAllTextAsync(destination, template.Value, cancellationToken);
             }
 
             // Parse the entire staged node before making it visible to repository readers.
@@ -428,7 +454,7 @@ public sealed class NodeService(
         {
             RelativePath = normalizedPath,
             FullPath = fullPath,
-            Metadata = MergeMetadata(index.Metadata, state.Metadata),
+            Metadata = MergeMetadata(index.Metadata, state.Metadata, timeline.Metadata, decisions.Metadata),
             IndexFileName = Path.GetFileName(indexPath),
             StateFileName = statePath is null ? "state.md" : Path.GetFileName(statePath),
             TimelineFileName = timelinePath is null ? "timeline.md" : Path.GetFileName(timelinePath),
@@ -528,7 +554,7 @@ public sealed class NodeService(
         return await markdownFileService.ReadAsync(path, cancellationToken);
     }
 
-    private static NodeMetadata MergeMetadata(NodeMetadata primary, NodeMetadata secondary) =>
+    private static NodeMetadata MergeMetadata(NodeMetadata primary, NodeMetadata secondary, NodeMetadata timeline, NodeMetadata decisions) =>
         new()
         {
             Title = primary.Title ?? secondary.Title,
@@ -536,7 +562,8 @@ public sealed class NodeService(
             Tags = primary.Tags.Count > 0 ? primary.Tags : secondary.Tags,
             Status = primary.Status,
             Priority = primary.Priority,
-            LastUpdated = primary.LastUpdated ?? secondary.LastUpdated,
+            LastUpdated = new[] { primary.LastUpdated, secondary.LastUpdated, timeline.LastUpdated, decisions.LastUpdated }.Max(),
+            ReviewAfter = primary.ReviewAfter,
             Owner = primary.Owner ?? secondary.Owner,
             Summary = primary.Summary ?? secondary.Summary,
         };
@@ -839,6 +866,12 @@ public sealed class HandoffService(
             .AppendLine(string.Join(Environment.NewLine, readFirst.Select(path => $"- `{path}`")))
             .ToString();
 
+        content = MemoryMarkdown.SetMetadata(content, new Dictionary<string, object?>
+        {
+            ["node_path"] = node.RelativePath,
+            ["created_at"] = clock.UtcNow.ToString("O"),
+            ["source_hashes"] = node.SourceHashes,
+        });
         await fileSystemService.WriteAllTextAsync(fullPath, content, cancellationToken);
 
         return new HandoffPacket

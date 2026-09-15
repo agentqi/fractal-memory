@@ -29,6 +29,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IExportService, ExportService>();
         services.AddSingleton<IHandoffService, HandoffService>();
         services.AddSingleton<IValidationService, ValidationService>();
+        services.AddSingleton<IMemoryWorkflowService, MemoryWorkflowService>();
         services.AddSingleton<IHumanFormatter, HumanFormatter>();
         services.AddSingleton<IAiExportFormatter, AiExportFormatter>();
         services.AddSingleton<InitRepositoryUseCase>();
