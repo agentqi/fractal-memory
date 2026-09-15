@@ -122,6 +122,12 @@ public sealed class MemoryWorkflowTests
         var node = await repo.Get<INodeService>().GetNodeAsync(repo.Root, Path, repo.Token);
         var answer = repo.Get<IStructuredMemoryService>().BuildAnswerContext(node, [], 3, 10);
         Assert.Equal("Use the new storage format.", Assert.Single(answer.KeyPriorDecisions));
+        var export = await repo.Get<IExportService>().ExportAsync(repo.Root, Path, ExportMode.Compact, repo.Token);
+        var source = Assert.Single(export.AnswerContext!.SupportingSources, item => item.SourcePath.EndsWith("decisions.md", StringComparison.Ordinal));
+        Assert.Equal("Use the new storage format.", source.Excerpt);
+        Assert.Equal($"Decision {second.DecisionId}", source.SectionHeading);
+        var rawLines = MemoryMarkdown.Normalize(await repo.ReadAsync($"{Path}/decisions.md")).Split('\n');
+        Assert.Equal("Use the new storage format.", rawLines[source.StartLine!.Value - 1]);
         var pack = await workflow.ContextAsync(repo.Root, Path, 6000, null, repo.Token);
         Assert.DoesNotContain("Use the old storage format.", pack.Text, StringComparison.Ordinal);
         await Assert.ThrowsAsync<InvalidOperationException>(() => workflow.AppendAsync(repo.Root, Path, "decisions", "Invalid replacement", second.Document.Hash, first.DecisionId, repo.Token));
@@ -283,6 +289,19 @@ public sealed class MemoryWorkflowTests
             workflow.ImportAsync(repo.Root, "research/second", "note.md", "# Identical source", null, true, repo.Token));
         Assert.Single(imports, result => result.Applied);
         Assert.Single(imports, result => result.DuplicateNodes.Count == 1);
+    }
+
+    [Fact]
+    public async Task ActiveDecisionEvidenceIncludesNestedContent()
+    {
+        using var repo = await RegressionRepository.CreateAsync();
+        await repo.CreateNodeAsync();
+        var workflow = repo.Get<IMemoryWorkflowService>();
+        var original = await workflow.ReadAsync(repo.Root, Path, "decisions", null, repo.Token);
+        await workflow.AppendAsync(repo.Root, Path, "decisions", "### Rationale\n\nKeep source files authoritative.", original.Hash, null, repo.Token);
+        var exported = await repo.Get<IExportService>().ExportAsync(repo.Root, Path, ExportMode.Compact, repo.Token);
+        var source = Assert.Single(exported.AnswerContext!.SupportingSources, item => item.SourcePath.EndsWith("decisions.md", StringComparison.Ordinal));
+        Assert.Contains("Keep source files authoritative.", source.Excerpt, StringComparison.Ordinal);
     }
 
 }

@@ -1,3 +1,4 @@
+using FractalMemory.Core.Infrastructure.Parsing;
 using System.Globalization;
 using System.Text.RegularExpressions;
 using FractalMemory.Core.Domain.Models;
@@ -185,9 +186,12 @@ internal static partial class RetrievalPipeline
             return;
         }
 
-        var sections = ParseSections(content)
-            .Where(item => item.Lines.Any(line => !string.IsNullOrWhiteSpace(line)))
-            .ToArray();
+        var managedDecisions = fileName == node.DecisionsFileName ? DecisionLog.Parse(content) : [];
+        var knowledge = MemoryMarkdown.Knowledge(content);
+        var candidateSections = managedDecisions.Count == 0 ? ParseSections(knowledge)
+            : managedDecisions.Where(d => d.Status == "active").Select(d => MemoryMarkdown.FindSection(knowledge, $"Decision {d.Id}"))
+                .Select(s => new MarkdownSection(s.Title, s.StartLine, s.EndLine, s.Content.Split('\n'))).ToArray();
+        var sections = candidateSections.Where(item => item.Lines.Any(line => !string.IsNullOrWhiteSpace(line))).ToArray();
         var section = preferredHeading == "Current State"
             ? sections.FirstOrDefault(item => item.Heading.Equals("Current Objective", StringComparison.OrdinalIgnoreCase) ||
                 item.Heading.Equals("Current Goal", StringComparison.OrdinalIgnoreCase))

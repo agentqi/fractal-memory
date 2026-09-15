@@ -117,8 +117,8 @@ public static class MemoryMarkdown
     }
 
     // Exact legacy scaffold text is guidance, never evidence of a real objective or decision.
-    public static string Knowledge(string text) => string.Join('\n', Regex.Replace(Normalize(text), @"<!--.*?-->", "", RegexOptions.Singleline)
-        .Split('\n').Where(line => !Placeholders.Contains(line.Trim().TrimStart('-', '*', ' '))));
+    public static string Knowledge(string text) => string.Join('\n', Regex.Replace(Normalize(text), @"<!--.*?-->", match => new string('\n', match.Value.Count(ch => ch == '\n')), RegexOptions.Singleline)
+        .Split('\n').Select(line => Placeholders.Contains(line.Trim().TrimStart('-', '*', ' ')) ? "" : line));
 
     private static readonly HashSet<string> Placeholders = new(StringComparer.Ordinal)
     {
