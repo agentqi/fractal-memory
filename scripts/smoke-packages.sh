@@ -95,4 +95,5 @@ IFS= read -r -t 15 invalid_depth_response <&4
 grep -Fq '"isError":true' <<<"$invalid_depth_response"
 
 cleanup_server
+python3 "$(dirname "$0")/smoke-workflows.py" "$tool_dir/fm" "$tool_dir/fractalmem-mcp"
 printf 'Package smoke test passed for FractalMem %s.\n' "$version"

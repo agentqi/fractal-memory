@@ -10,7 +10,13 @@ public static class CliRunner
         try
         {
             var root = CommandFactory.Create(provider);
-            return await root.Parse(args).InvokeAsync();
+            var parsed = root.Parse(args);
+            if (parsed.Errors.Count > 0 && args.Contains("--json", StringComparer.Ordinal))
+            {
+                await Console.Error.WriteLineAsync(System.Text.Json.JsonSerializer.Serialize(new { error = string.Join(" ", parsed.Errors.Select(e => e.Message)) }, WorkflowCommands.JsonOptions));
+                return CliExitCodes.UserError;
+            }
+            return await parsed.InvokeAsync();
         }
         catch (ArgumentException exception)
         {

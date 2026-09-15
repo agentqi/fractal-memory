@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Added hash-checked section updates, dated timeline entries and managed decisions with supersession across CLI and MCP.
+- Added full document/section/artifact reads with source hashes, source coordinates and native MCP resource links.
+- Added review scheduling, stale/incomplete memory attention lists and explicit archived-node discovery.
+- Added bounded context packs and node-scoped resumption with handoff source-hash comparisons.
+- Added preview-first single-note import with source preservation, duplicate/conflict detection and atomic node staging.
+- Added doctor/index repair, CLI JSON output and actionable MCP validation errors.
+- Shared source-aware heading parsing across workflows and retrieval; ignored legacy scaffold guidance as recorded knowledge and upgraded derived caches to format 3.
+
 - Fixed metadata-only cache invalidation; explicit refresh now bypasses caches, verifies cache integrity, repairs damaged files, and upgrades older cache formats.
 - Made deep and focused state reads complete, selected populated sections for working views, and exposed an abridged-state indicator.
 - Preserved original Markdown source line numbers through parsing and caching, and restored state evidence in exports and handoffs.
