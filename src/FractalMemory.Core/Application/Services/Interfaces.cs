@@ -111,6 +111,7 @@ public interface ITemplateService
         string repositoryRoot,
         string nodeName,
         NodeFileFormat format,
+        bool includeFrontMatter,
         CancellationToken cancellationToken);
 }
 

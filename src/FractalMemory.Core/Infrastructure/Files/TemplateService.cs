@@ -1,18 +1,21 @@
+using System.Globalization;
 using FractalMemory.Core.Application.Services;
 using FractalMemory.Core.Domain.Enums;
 
 namespace FractalMemory.Core.Infrastructure.Files;
 
-public sealed class TemplateService(IFileSystemService fileSystemService) : ITemplateService
+public sealed class TemplateService(IFileSystemService fileSystemService, IClock clock) : ITemplateService
 {
-    public IReadOnlyDictionary<string, string> GetRepositoryTemplates() =>
-        new Dictionary<string, string>(StringComparer.Ordinal)
+    public IReadOnlyDictionary<string, string> GetRepositoryTemplates()
+    {
+        var templates = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["root/index.md"] = """
                 ---
                 title: Root Memory
                 status: active
                 priority: high
+                last_updated: {{LAST_UPDATED}}
                 summary: Entry point for the repository memory tree.
                 ---
 
@@ -32,6 +35,7 @@ public sealed class TemplateService(IFileSystemService fileSystemService) : ITem
                 title: Root State
                 status: active
                 priority: high
+                last_updated: {{LAST_UPDATED}}
                 summary: Current working state for the overall repository.
                 ---
 
@@ -62,6 +66,7 @@ public sealed class TemplateService(IFileSystemService fileSystemService) : ITem
                 title: Root Timeline
                 status: active
                 priority: medium
+                last_updated: {{LAST_UPDATED}}
                 summary: Chronological updates for the repository.
                 ---
 
@@ -74,6 +79,7 @@ public sealed class TemplateService(IFileSystemService fileSystemService) : ITem
                 title: Root Decisions
                 status: active
                 priority: medium
+                last_updated: {{LAST_UPDATED}}
                 summary: Important cross-cutting decisions and rationale.
                 ---
 
@@ -83,10 +89,11 @@ public sealed class TemplateService(IFileSystemService fileSystemService) : ITem
                 """,
             ["templates/node/index.md"] = """
                 ---
-                title: Node Template Index
+                title: {{TITLE}}
                 status: active
                 priority: medium
-                summary: Template for node summary and navigation.
+                last_updated: {{LAST_UPDATED}}
+                summary: Summary for {{TITLE}}.
                 ---
 
                 # {{TITLE}}
@@ -103,10 +110,11 @@ public sealed class TemplateService(IFileSystemService fileSystemService) : ITem
                 """,
             ["templates/node/state.md"] = """
                 ---
-                title: Node Template State
+                title: {{TITLE}} State
                 status: active
                 priority: medium
-                summary: Template for the current working truth.
+                last_updated: {{LAST_UPDATED}}
+                summary: Current working truth for {{TITLE}}.
                 ---
 
                 # Current State
@@ -133,10 +141,11 @@ public sealed class TemplateService(IFileSystemService fileSystemService) : ITem
                 """,
             ["templates/node/timeline.md"] = """
                 ---
-                title: Node Template Timeline
+                title: {{TITLE}} Timeline
                 status: active
                 priority: medium
-                summary: Template for chronological updates.
+                last_updated: {{LAST_UPDATED}}
+                summary: Chronological updates for {{TITLE}}.
                 ---
 
                 # Timeline
@@ -145,10 +154,11 @@ public sealed class TemplateService(IFileSystemService fileSystemService) : ITem
                 """,
             ["templates/node/decisions.md"] = """
                 ---
-                title: Node Template Decisions
+                title: {{TITLE}} Decisions
                 status: active
                 priority: medium
-                summary: Template for important decisions.
+                last_updated: {{LAST_UPDATED}}
+                summary: Important decisions for {{TITLE}}.
                 ---
 
                 # Decisions
@@ -157,9 +167,19 @@ public sealed class TemplateService(IFileSystemService fileSystemService) : ITem
                 """,
         };
 
+        var timestamp = FormatTimestamp();
+        return templates.ToDictionary(
+            pair => pair.Key,
+            pair => pair.Key.StartsWith("root/", StringComparison.Ordinal)
+                ? pair.Value.Replace("{{LAST_UPDATED}}", timestamp, StringComparison.Ordinal)
+                : pair.Value,
+            StringComparer.Ordinal);
+    }
+
     public IReadOnlyDictionary<string, string> GetNodeTemplates(string nodeName, NodeFileFormat format = NodeFileFormat.Markdown)
     {
         var title = Humanize(nodeName);
+        var timestamp = FormatTimestamp();
         if (format == NodeFileFormat.Html)
         {
             return new Dictionary<string, string>(StringComparer.Ordinal)
@@ -260,6 +280,7 @@ public sealed class TemplateService(IFileSystemService fileSystemService) : ITem
                 title: {{title}}
                 status: active
                 priority: medium
+                last_updated: {{timestamp}}
                 summary: Summary for {{title}}.
                 ---
 
@@ -280,6 +301,7 @@ public sealed class TemplateService(IFileSystemService fileSystemService) : ITem
                 title: {{title}} State
                 status: active
                 priority: medium
+                last_updated: {{timestamp}}
                 summary: Current working truth for {{title}}.
                 ---
 
@@ -310,6 +332,7 @@ public sealed class TemplateService(IFileSystemService fileSystemService) : ITem
                 title: {{title}} Timeline
                 status: active
                 priority: medium
+                last_updated: {{timestamp}}
                 summary: Chronological updates for {{title}}.
                 ---
 
@@ -322,6 +345,7 @@ public sealed class TemplateService(IFileSystemService fileSystemService) : ITem
                 title: {{title}} Decisions
                 status: active
                 priority: medium
+                last_updated: {{timestamp}}
                 summary: Important decisions for {{title}}.
                 ---
 
@@ -336,9 +360,11 @@ public sealed class TemplateService(IFileSystemService fileSystemService) : ITem
         string repositoryRoot,
         string nodeName,
         NodeFileFormat format,
+        bool includeFrontMatter,
         CancellationToken cancellationToken)
     {
-        var templateRoot = Path.Combine(repositoryRoot, ".fractal-memory", "templates", "node");
+        var storageRoot = RepositoryPathGuard.ResolveContainedPath(repositoryRoot, ".fractal-memory");
+        var templateRoot = RepositoryPathGuard.ResolveContainedPath(storageRoot, "templates/node");
         if (format == NodeFileFormat.Html)
         {
             return GetNodeTemplates(nodeName, format);
@@ -347,20 +373,52 @@ public sealed class TemplateService(IFileSystemService fileSystemService) : ITem
         var templateFiles = new[] { "index.md", "state.md", "timeline.md", "decisions.md" };
         if (!templateFiles.All(file => fileSystemService.FileExists(Path.Combine(templateRoot, file))))
         {
-            return GetNodeTemplates(nodeName, format);
+            return ApplyFrontMatterPreference(GetNodeTemplates(nodeName, format), includeFrontMatter);
         }
 
         var title = Humanize(nodeName);
+        var timestamp = FormatTimestamp();
         var templates = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var file in templateFiles)
         {
-            var path = Path.Combine(templateRoot, file);
+            var path = RepositoryPathGuard.ResolveContainedPath(templateRoot, file);
             var content = await fileSystemService.ReadAllTextAsync(path, cancellationToken);
-            templates[file] = content.Replace("{{TITLE}}", title, StringComparison.Ordinal);
+            templates[file] = content
+                .Replace("{{TITLE}}", title, StringComparison.Ordinal)
+                .Replace("{{LAST_UPDATED}}", timestamp, StringComparison.Ordinal);
         }
 
-        return templates;
+        return ApplyFrontMatterPreference(templates, includeFrontMatter);
     }
+
+    private static IReadOnlyDictionary<string, string> ApplyFrontMatterPreference(
+        IReadOnlyDictionary<string, string> templates,
+        bool includeFrontMatter)
+    {
+        if (includeFrontMatter)
+        {
+            return templates;
+        }
+
+        return templates.ToDictionary(
+            pair => pair.Key,
+            pair => StripFrontMatter(pair.Value),
+            StringComparer.Ordinal);
+    }
+
+    private static string StripFrontMatter(string content)
+    {
+        if (!content.StartsWith("---", StringComparison.Ordinal))
+        {
+            return content;
+        }
+
+        var normalized = content.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
+        var closing = normalized.IndexOf("\n---\n", 3, StringComparison.Ordinal);
+        return closing < 0 ? content : normalized[(closing + 5)..].TrimStart('\n');
+    }
+
+    private string FormatTimestamp() => clock.UtcNow.ToString("O", CultureInfo.InvariantCulture);
 
     private static string Humanize(string value) =>
         string.Join(' ', value.Split('-', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)

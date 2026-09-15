@@ -15,10 +15,10 @@ public sealed class ReadSearchExportTests
         var readService = provider.GetRequiredService<IReadService>();
         var temp = TestEnvironment.CreateTempDirectory();
 
-        await repositoryService.InitializeAsync(temp, CancellationToken.None);
-        await nodeService.CreateNodeAsync(temp, "projects/fractal-memory-cli", CancellationToken.None);
+        await repositoryService.InitializeAsync(temp, TestContext.Current.CancellationToken);
+        await nodeService.CreateNodeAsync(temp, "projects/fractal-memory-cli", TestContext.Current.CancellationToken);
         var nodeRoot = Path.Combine(temp, ".fractal-memory", "projects", "fractal-memory-cli");
-        await File.WriteAllTextAsync(Path.Combine(nodeRoot, "index.md"), """
+        await TestFile.WriteAllTextAsync(Path.Combine(nodeRoot, "index.md"), """
             ---
             title: Fractal Memory CLI
             summary: Build the structured memory CLI.
@@ -28,7 +28,7 @@ public sealed class ReadSearchExportTests
 
             Overview paragraph.
             """);
-        await File.WriteAllTextAsync(Path.Combine(nodeRoot, "state.md"), """
+        await TestFile.WriteAllTextAsync(Path.Combine(nodeRoot, "state.md"), """
             ---
             title: Fractal Memory CLI State
             ---
@@ -36,7 +36,7 @@ public sealed class ReadSearchExportTests
             Current work is implementing the MVP command set.
             Open question? settle export defaults.
             """);
-        await File.WriteAllTextAsync(Path.Combine(nodeRoot, "timeline.md"), """
+        await TestFile.WriteAllTextAsync(Path.Combine(nodeRoot, "timeline.md"), """
             ---
             title: Timeline
             ---
@@ -44,7 +44,7 @@ public sealed class ReadSearchExportTests
             - 2026-04-01: Designed the repository layout.
             - 2026-04-02: Implemented the command surface.
             """);
-        await File.WriteAllTextAsync(Path.Combine(nodeRoot, "decisions.md"), """
+        await TestFile.WriteAllTextAsync(Path.Combine(nodeRoot, "decisions.md"), """
             ---
             title: Decisions
             ---
@@ -52,8 +52,8 @@ public sealed class ReadSearchExportTests
             - Prefer filesystem truth over indexes.
             """);
 
-        var orientation = await readService.OpenAsync(temp, "projects/fractal-memory-cli", RetrievalDepth.Orientation, NodeViewType.Index, CancellationToken.None);
-        var deep = await readService.OpenAsync(temp, "projects/fractal-memory-cli", RetrievalDepth.Deep, NodeViewType.Index, CancellationToken.None);
+        var orientation = await readService.OpenAsync(temp, "projects/fractal-memory-cli", RetrievalDepth.Orientation, NodeViewType.Index, TestContext.Current.CancellationToken);
+        var deep = await readService.OpenAsync(temp, "projects/fractal-memory-cli", RetrievalDepth.Deep, NodeViewType.Index, TestContext.Current.CancellationToken);
 
         Assert.Null(orientation.CurrentState);
         Assert.NotNull(deep.CurrentState);
@@ -70,10 +70,10 @@ public sealed class ReadSearchExportTests
         var searchService = provider.GetRequiredService<ISearchService>();
         var temp = TestEnvironment.CreateTempDirectory();
 
-        await repositoryService.InitializeAsync(temp, CancellationToken.None);
-        await nodeService.CreateNodeAsync(temp, "projects/alpha", CancellationToken.None);
-        await nodeService.CreateNodeAsync(temp, "research/notes", CancellationToken.None);
-        await File.WriteAllTextAsync(Path.Combine(temp, ".fractal-memory", "research", "notes", "state.md"), """
+        await repositoryService.InitializeAsync(temp, TestContext.Current.CancellationToken);
+        await nodeService.CreateNodeAsync(temp, "projects/alpha", TestContext.Current.CancellationToken);
+        await nodeService.CreateNodeAsync(temp, "research/notes", TestContext.Current.CancellationToken);
+        await TestFile.WriteAllTextAsync(Path.Combine(temp, ".fractal-memory", "research", "notes", "state.md"), """
             ---
             title: Notes
             ---
@@ -81,7 +81,7 @@ public sealed class ReadSearchExportTests
             projects/alpha is referenced in content only.
             """);
 
-        var results = await searchService.SearchAsync(temp, "projects/alpha", CancellationToken.None);
+        var results = await searchService.SearchAsync(temp, "projects/alpha", TestContext.Current.CancellationToken);
 
         Assert.NotEmpty(results);
         Assert.Equal("projects/alpha", results[0].RelativePath);
@@ -97,10 +97,10 @@ public sealed class ReadSearchExportTests
         var searchService = provider.GetRequiredService<ISearchService>();
         var temp = TestEnvironment.CreateTempDirectory();
 
-        await repositoryService.InitializeAsync(temp, CancellationToken.None);
-        await nodeService.CreateNodeAsync(temp, "projects/html-artifacts", CancellationToken.None);
+        await repositoryService.InitializeAsync(temp, TestContext.Current.CancellationToken);
+        await nodeService.CreateNodeAsync(temp, "projects/html-artifacts", TestContext.Current.CancellationToken);
         var artifactsRoot = Path.Combine(temp, ".fractal-memory", "projects", "html-artifacts", "artifacts");
-        await File.WriteAllTextAsync(Path.Combine(artifactsRoot, "design.html"), """
+        await TestFile.WriteAllTextAsync(Path.Combine(artifactsRoot, "design.html"), """
             <!doctype html>
             <html>
               <head>
@@ -115,7 +115,7 @@ public sealed class ReadSearchExportTests
             </html>
             """);
 
-        var results = await searchService.SearchAsync(temp, "aurora onboarding prototype", CancellationToken.None);
+        var results = await searchService.SearchAsync(temp, "aurora onboarding prototype", TestContext.Current.CancellationToken);
 
         Assert.NotEmpty(results);
         Assert.Equal("projects/html-artifacts", results[0].RelativePath);
@@ -133,12 +133,12 @@ public sealed class ReadSearchExportTests
         var readService = provider.GetRequiredService<IReadService>();
         var temp = TestEnvironment.CreateTempDirectory();
 
-        await repositoryService.InitializeAsync(temp, CancellationToken.None);
-        await nodeService.CreateNodeAsync(temp, "projects/crlf", CancellationToken.None);
+        await repositoryService.InitializeAsync(temp, TestContext.Current.CancellationToken);
+        await nodeService.CreateNodeAsync(temp, "projects/crlf", TestContext.Current.CancellationToken);
         var nodeRoot = Path.Combine(temp, ".fractal-memory", "projects", "crlf");
-        await File.WriteAllTextAsync(Path.Combine(nodeRoot, "state.md"), "---\r\ntitle: CRLF State\r\n---\r\n\r\nFirst paragraph.\r\n\r\nSecond paragraph.\r\n\r\nThird paragraph.\r\n");
+        await TestFile.WriteAllTextAsync(Path.Combine(nodeRoot, "state.md"), "---\r\ntitle: CRLF State\r\n---\r\n\r\nFirst paragraph.\r\n\r\nSecond paragraph.\r\n\r\nThird paragraph.\r\n");
 
-        var opened = await readService.OpenAsync(temp, "projects/crlf", RetrievalDepth.Working, NodeViewType.Index, CancellationToken.None);
+        var opened = await readService.OpenAsync(temp, "projects/crlf", RetrievalDepth.Working, NodeViewType.Index, TestContext.Current.CancellationToken);
 
         Assert.NotNull(opened.CurrentState);
         Assert.Contains("First paragraph.", opened.CurrentState, StringComparison.Ordinal);
@@ -155,10 +155,10 @@ public sealed class ReadSearchExportTests
         var searchService = provider.GetRequiredService<ISearchService>();
         var temp = TestEnvironment.CreateTempDirectory();
 
-        await repositoryService.InitializeAsync(temp, CancellationToken.None);
-        await nodeService.CreateNodeAsync(temp, "projects/future-clock", CancellationToken.None);
+        await repositoryService.InitializeAsync(temp, TestContext.Current.CancellationToken);
+        await nodeService.CreateNodeAsync(temp, "projects/future-clock", TestContext.Current.CancellationToken);
 
-        var items = await searchService.GetRecentAsync(temp, 10, 30, null, CancellationToken.None);
+        var items = await searchService.GetRecentAsync(temp, 10, 30, null, TestContext.Current.CancellationToken);
 
         Assert.Empty(items);
     }
@@ -175,10 +175,10 @@ public sealed class ReadSearchExportTests
         var indexService = provider.GetRequiredService<IIndexService>();
         var temp = TestEnvironment.CreateTempDirectory();
 
-        await repositoryService.InitializeAsync(temp, CancellationToken.None);
-        await nodeService.CreateNodeAsync(temp, "projects/fractal-memory-cli", CancellationToken.None);
+        await repositoryService.InitializeAsync(temp, TestContext.Current.CancellationToken);
+        await nodeService.CreateNodeAsync(temp, "projects/fractal-memory-cli", TestContext.Current.CancellationToken);
         var nodeRoot = Path.Combine(temp, ".fractal-memory", "projects", "fractal-memory-cli");
-        await File.WriteAllTextAsync(Path.Combine(nodeRoot, "index.md"), """
+        await TestFile.WriteAllTextAsync(Path.Combine(nodeRoot, "index.md"), """
             ---
             title: Fractal Memory CLI
             aliases: [fm]
@@ -188,7 +188,7 @@ public sealed class ReadSearchExportTests
 
             Overview.
             """);
-        await File.WriteAllTextAsync(Path.Combine(nodeRoot, "state.md"), """
+        await TestFile.WriteAllTextAsync(Path.Combine(nodeRoot, "state.md"), """
             ---
             title: Current State
             ---
@@ -196,7 +196,7 @@ public sealed class ReadSearchExportTests
             Current goal is finishing the MVP.
             What should verbose export include?
             """);
-        await File.WriteAllTextAsync(Path.Combine(nodeRoot, "decisions.md"), """
+        await TestFile.WriteAllTextAsync(Path.Combine(nodeRoot, "decisions.md"), """
             ---
             title: Decisions
             ---
@@ -204,17 +204,17 @@ public sealed class ReadSearchExportTests
             - Use markdown files as source of truth.
             """);
 
-        await indexService.RefreshAsync(temp, CancellationToken.None);
-        var export = await exportService.ExportAsync(temp, "projects/fractal-memory-cli", ExportMode.Standard, CancellationToken.None);
+        await indexService.RefreshAsync(temp, TestContext.Current.CancellationToken);
+        var export = await exportService.ExportAsync(temp, "projects/fractal-memory-cli", ExportMode.Standard, TestContext.Current.CancellationToken);
         var rendered = aiFormatter.Format(export);
-        var handoff = await handoffService.CreateAsync(temp, "projects/fractal-memory-cli", CancellationToken.None);
+        var handoff = await handoffService.CreateAsync(temp, "projects/fractal-memory-cli", TestContext.Current.CancellationToken);
 
         Assert.Contains("[memory:projects/fractal-memory-cli]", rendered, StringComparison.Ordinal);
         Assert.Contains("decision_highlights:", rendered, StringComparison.Ordinal);
         Assert.True(File.Exists(Path.Combine(temp, handoff.HandoffFilePath)));
 
-        var aliases = await File.ReadAllTextAsync(Path.Combine(temp, ".fractal-memory", "indexes", "aliases.yaml"));
-        var paths = await File.ReadAllTextAsync(Path.Combine(temp, ".fractal-memory", "indexes", "paths.yaml"));
+        var aliases = await TestFile.ReadAllTextAsync(Path.Combine(temp, ".fractal-memory", "indexes", "aliases.yaml"));
+        var paths = await TestFile.ReadAllTextAsync(Path.Combine(temp, ".fractal-memory", "indexes", "paths.yaml"));
         Assert.Contains("fm", aliases, StringComparison.Ordinal);
         Assert.Contains("projects/fractal-memory-cli", paths, StringComparison.Ordinal);
     }

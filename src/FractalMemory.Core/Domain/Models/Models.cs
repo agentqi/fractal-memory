@@ -5,7 +5,6 @@ namespace FractalMemory.Core.Domain.Models;
 public sealed class RepositoryConfig
 {
     public string Version { get; init; } = "0.1";
-    public string RootDir { get; init; } = ".fractal-memory";
     public RetrievalDepth DefaultDepth { get; init; } = RetrievalDepth.Orientation;
     public ExportMode DefaultExportMode { get; init; } = ExportMode.Compact;
     public IndexingOptions Indexing { get; init; } = new();

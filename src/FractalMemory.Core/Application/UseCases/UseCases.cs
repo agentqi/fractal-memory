@@ -25,7 +25,7 @@ public sealed class CreateNodeUseCase(
         var repositoryRoot = repositoryService.FindRepositoryRoot(workingDirectory)
             ?? throw new InvalidOperationException("No FractalMemory repository found.");
         var config = await repositoryService.LoadConfigAsync(repositoryRoot, cancellationToken);
-        if (config.Indexing.Enabled)
+        if (config.Indexing.Enabled && config.Indexing.RefreshOnWrite)
         {
             await indexService.RefreshAsync(repositoryRoot, cancellationToken);
         }

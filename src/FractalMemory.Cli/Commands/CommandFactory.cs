@@ -44,7 +44,7 @@ public static class CommandFactory
 
         var open = new Command("open", "Open a node.");
         var openPathArgument = new Argument<string>("path");
-        var depthOption = new Option<RetrievalDepth>("--depth") { DefaultValueFactory = _ => RetrievalDepth.Orientation };
+        var depthOption = new Option<RetrievalDepth?>("--depth");
         var viewOption = new Option<NodeViewType>("--view") { DefaultValueFactory = _ => NodeViewType.Index };
         open.Arguments.Add(openPathArgument);
         open.Options.Add(depthOption);
@@ -52,10 +52,11 @@ public static class CommandFactory
         open.SetAction((parseResult, cancellationToken) => ExecuteAsync(async () =>
         {
             var useCase = provider.GetRequiredService<OpenNodeUseCase>();
+            var config = await LoadConfigAsync(provider, cancellationToken);
             var result = await useCase.ExecuteAsync(
                 Environment.CurrentDirectory,
                 parseResult.GetRequiredValue(openPathArgument),
-                parseResult.GetValue(depthOption),
+                parseResult.GetValue(depthOption) ?? config.DefaultDepth,
                 parseResult.GetValue(viewOption),
                 cancellationToken);
             Console.WriteLine(formatter.FormatOpen(result));
@@ -83,16 +84,17 @@ public static class CommandFactory
 
         var export = new Command("export", "Export a node as AI-friendly text.");
         var exportPathArgument = new Argument<string>("path");
-        var modeOption = new Option<ExportMode>("--mode") { DefaultValueFactory = _ => ExportMode.Compact };
+        var modeOption = new Option<ExportMode?>("--mode");
         export.Arguments.Add(exportPathArgument);
         export.Options.Add(modeOption);
         export.SetAction((parseResult, cancellationToken) => ExecuteAsync(async () =>
         {
             var useCase = provider.GetRequiredService<ExportUseCase>();
+            var config = await LoadConfigAsync(provider, cancellationToken);
             var document = await useCase.ExecuteAsync(
                 Environment.CurrentDirectory,
                 parseResult.GetRequiredValue(exportPathArgument),
-                parseResult.GetValue(modeOption),
+                parseResult.GetValue(modeOption) ?? config.DefaultExportMode,
                 cancellationToken);
             Console.WriteLine(aiFormatter.Format(document));
         }));
@@ -203,6 +205,16 @@ public static class CommandFactory
                 await Console.Error.WriteLineAsync($"Error: {exception.Message}");
                 return CliExitCodes.UserError;
             }
+        }
+
+        static async Task<FractalMemory.Core.Domain.Models.RepositoryConfig> LoadConfigAsync(
+            ServiceProvider provider,
+            CancellationToken cancellationToken)
+        {
+            var repositoryService = provider.GetRequiredService<IRepositoryService>();
+            var repositoryRoot = repositoryService.FindRepositoryRoot(Environment.CurrentDirectory)
+                ?? throw new InvalidOperationException("No FractalMemory repository found.");
+            return await repositoryService.LoadConfigAsync(repositoryRoot, cancellationToken);
         }
     }
 }

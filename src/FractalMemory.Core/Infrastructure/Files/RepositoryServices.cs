@@ -27,8 +27,15 @@ public sealed class RepositoryService(
             throw new InvalidOperationException($"Repository already exists at '{existing}'.");
         }
 
-        var repositoryRoot = Path.Combine(workingDirectory, ".fractal-memory");
+        var repositoryRoot = RepositoryPathGuard.ResolveContainedPath(workingDirectory, ".fractal-memory");
+        if (fileSystemService.DirectoryExists(repositoryRoot) || fileSystemService.FileExists(repositoryRoot))
+        {
+            throw new InvalidOperationException(
+                $"Cannot initialize because FractalMem storage already exists at '{repositoryRoot}' without a valid config.yaml.");
+        }
+
         fileSystemService.CreateDirectory(repositoryRoot);
+        RepositoryPathGuard.EnsureContainedPath(workingDirectory, repositoryRoot);
 
         foreach (var relativeDirectory in new[]
         {
@@ -51,12 +58,11 @@ public sealed class RepositoryService(
 
         var config = """
             version: 0.1
-            root_dir: .fractal-memory
             default_depth: 1
             default_export_mode: compact
             indexing:
               enabled: true
-              refresh_on_write: false
+              refresh_on_write: true
             retrieval:
               diagnostic_top_k: 10
               answer_top_k: 3
@@ -109,35 +115,60 @@ public sealed class RepositoryService(
 
     public async Task<RepositoryConfig> LoadConfigAsync(string repositoryRoot, CancellationToken cancellationToken)
     {
-        var configPath = Path.Combine(GetStorageRoot(repositoryRoot), "config.yaml");
+        var storageRoot = GetStorageRoot(repositoryRoot);
+        var configPath = RepositoryPathGuard.ResolveContainedPath(storageRoot, "config.yaml");
         var yaml = await fileSystemService.ReadAllTextAsync(configPath, cancellationToken);
         var data = ConfigDeserializer.Deserialize<Dictionary<object, object?>>(yaml) ?? [];
+
+        var defaultDepthValue = GetInt(data, "default_depth") ?? (int)RetrievalDepth.Orientation;
+        if (!Enum.IsDefined(typeof(RetrievalDepth), defaultDepthValue))
+        {
+            throw new InvalidOperationException("Configuration value 'default_depth' must be between 0 and 3.");
+        }
+
+        var defaultExportModeValue = GetString(data, "default_export_mode") ?? ExportMode.Compact.ToString();
+        if (!Enum.TryParse<ExportMode>(defaultExportModeValue, true, out var defaultExportMode))
+        {
+            throw new InvalidOperationException("Configuration value 'default_export_mode' must be compact, standard, or verbose.");
+        }
+
+        var retrieval = GetSection(data, "retrieval");
+        var diagnosticTopK = retrieval is null ? 10 : GetInt(retrieval, "diagnostic_top_k") ?? 10;
+        var answerTopK = retrieval is null ? 3 : GetInt(retrieval, "answer_top_k") ?? 3;
+        var maxSnippetLines = retrieval is null ? 4 : GetInt(retrieval, "max_snippet_lines") ?? 4;
+        if (diagnosticTopK <= 0 || answerTopK <= 0 || maxSnippetLines <= 0)
+        {
+            throw new InvalidOperationException("Retrieval limits in config.yaml must be positive integers.");
+        }
+
+        var handoffs = GetSection(data, "handoffs");
+        var handoffDirectory = RepositoryPathGuard.NormalizeRelativeDirectory(
+            handoffs is null ? "handoffs" : GetString(handoffs, "directory") ?? "handoffs");
 
         return new RepositoryConfig
         {
             Version = GetString(data, "version") ?? "0.1",
-            RootDir = GetString(data, "root_dir") ?? ".fractal-memory",
-            DefaultDepth = (RetrievalDepth)(GetInt(data, "default_depth") ?? 1),
-            DefaultExportMode = Enum.TryParse<ExportMode>(GetString(data, "default_export_mode"), true, out var mode) ? mode : ExportMode.Compact,
+            DefaultDepth = (RetrievalDepth)defaultDepthValue,
+            DefaultExportMode = defaultExportMode,
             Indexing = GetSection(data, "indexing") is { } indexing ? new IndexingOptions
             {
                 Enabled = GetBool(indexing, "enabled") ?? true,
                 RefreshOnWrite = GetBool(indexing, "refresh_on_write") ?? false,
             } : new IndexingOptions(),
-            Retrieval = GetSection(data, "retrieval") is { } retrieval ? new RetrievalOptions
+            Retrieval = new RetrievalOptions
             {
-                DiagnosticTopK = GetInt(retrieval, "diagnostic_top_k") ?? 10,
-                AnswerTopK = GetInt(retrieval, "answer_top_k") ?? 3,
-                MaxSnippetLines = GetInt(retrieval, "max_snippet_lines") ?? 4,
-            } : new RetrievalOptions(),
+                DiagnosticTopK = diagnosticTopK,
+                AnswerTopK = answerTopK,
+                MaxSnippetLines = maxSnippetLines,
+            },
             Metadata = GetSection(data, "metadata") is { } metadata ? new MetadataOptions
             {
                 FrontMatter = GetBool(metadata, "front_matter") ?? true,
             } : new MetadataOptions(),
-            Handoffs = GetSection(data, "handoffs") is { } handoffs ? new HandoffOptions
+            Handoffs = new HandoffOptions
             {
-                Directory = GetString(handoffs, "directory") ?? "handoffs",
-            } : new HandoffOptions(),
+                Directory = handoffDirectory,
+            },
             Validation = GetSection(data, "validation") is { } validation ? new ValidationOptions
             {
                 RequireIndex = GetBool(validation, "require_index") ?? true,
@@ -146,7 +177,8 @@ public sealed class RepositoryService(
         };
     }
 
-    public string GetStorageRoot(string repositoryRoot) => Path.Combine(repositoryRoot, ".fractal-memory");
+    public string GetStorageRoot(string repositoryRoot) =>
+        RepositoryPathGuard.ResolveContainedPath(repositoryRoot, ".fractal-memory");
 
     private static IReadOnlyDictionary<object, object?>? GetSection(IReadOnlyDictionary<object, object?> source, string key) =>
         source.TryGetValue(key, out var section) ? section as IReadOnlyDictionary<object, object?> : null;
@@ -185,7 +217,7 @@ public sealed class NodeService(
 
         var normalizedPath = NormalizeNodePath(nodePath);
         var storageRoot = repositoryService.GetStorageRoot(repositoryRoot);
-        var fullPath = Path.Combine(storageRoot, normalizedPath.Replace('/', Path.DirectorySeparatorChar));
+        var fullPath = RepositoryPathGuard.ResolveContainedPath(storageRoot, normalizedPath);
         if (fileSystemService.DirectoryExists(fullPath))
         {
             throw new InvalidOperationException($"Node '{normalizedPath}' already exists.");
@@ -195,7 +227,13 @@ public sealed class NodeService(
         fileSystemService.CreateDirectory(Path.Combine(fullPath, "children"));
         fileSystemService.CreateDirectory(Path.Combine(fullPath, "artifacts"));
 
-        var templates = await templateService.GetNodeTemplatesAsync(repositoryRoot, Path.GetFileName(normalizedPath), format, cancellationToken);
+        var config = await repositoryService.LoadConfigAsync(repositoryRoot, cancellationToken);
+        var templates = await templateService.GetNodeTemplatesAsync(
+            repositoryRoot,
+            Path.GetFileName(normalizedPath),
+            format,
+            config.Metadata.FrontMatter,
+            cancellationToken);
         foreach (var template in templates)
         {
             await fileSystemService.WriteAllTextAsync(Path.Combine(fullPath, template.Key), template.Value + Environment.NewLine, cancellationToken);
@@ -258,6 +296,7 @@ public sealed class NodeService(
         var entries = new SortedDictionary<string, long>(StringComparer.Ordinal);
         foreach (var file in EnumerateNodeFingerprintFilesStatic(fileSystem, storageRoot))
         {
+            RepositoryPathGuard.EnsureContainedPath(storageRoot, file);
             var relative = Path.GetRelativePath(storageRoot, file).Replace(Path.DirectorySeparatorChar, '/');
             entries[relative] = fileSystem.GetLastWriteTimeUtc(file).UtcTicks;
         }
@@ -309,6 +348,7 @@ public sealed class NodeService(
     public async Task<IReadOnlyList<MemoryNode>> GetChildNodesAsync(string repositoryRoot, MemoryNode node, CancellationToken cancellationToken)
     {
         var childrenDirectory = Path.Combine(node.FullPath, "children");
+        RepositoryPathGuard.EnsureContainedPath(repositoryService.GetStorageRoot(repositoryRoot), childrenDirectory);
         var children = new List<MemoryNode>();
         foreach (var childDirectory in fileSystemService.EnumerateDirectories(childrenDirectory))
         {
@@ -328,7 +368,7 @@ public sealed class NodeService(
     private async Task<MemoryNode> LoadNodeAsync(string repositoryRoot, string normalizedPath, CancellationToken cancellationToken)
     {
         var storageRoot = repositoryService.GetStorageRoot(repositoryRoot);
-        var fullPath = Path.Combine(storageRoot, normalizedPath.Replace('/', Path.DirectorySeparatorChar));
+        var fullPath = RepositoryPathGuard.ResolveContainedPath(storageRoot, normalizedPath);
         if (!fileSystemService.DirectoryExists(fullPath))
         {
             throw new InvalidOperationException($"Node '{normalizedPath}' does not exist.");
@@ -665,10 +705,14 @@ public sealed class HandoffService(
             .ToArray();
         var freshness = node.Metadata.LastUpdated?.ToString("O", CultureInfo.InvariantCulture) ?? "Unknown";
 
-        var timestamp = clock.UtcNow.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture);
+        var timestamp = clock.UtcNow.ToString("yyyyMMdd-HHmmssfff", CultureInfo.InvariantCulture);
         var safeName = opened.RelativePath.Replace('/', '-');
-        var handoffRelativePath = Path.Combine(".fractal-memory", config.Handoffs.Directory, $"{timestamp}-{safeName}.md");
-        var fullPath = Path.Combine(repositoryRoot, handoffRelativePath);
+        var storageRoot = repositoryService.GetStorageRoot(repositoryRoot);
+        var handoffDirectory = RepositoryPathGuard.ResolveContainedPath(storageRoot, config.Handoffs.Directory);
+        fileSystemService.CreateDirectory(handoffDirectory);
+        RepositoryPathGuard.EnsureContainedPath(storageRoot, handoffDirectory);
+        var fileName = $"{timestamp}-{safeName}-{Guid.NewGuid():N}.md";
+        var fullPath = RepositoryPathGuard.ResolveContainedPath(handoffDirectory, fileName);
 
         var content = new StringBuilder()
             .AppendLine($"# Handoff: {opened.Title}")
@@ -719,7 +763,7 @@ public sealed class HandoffService(
         return new HandoffPacket
         {
             RelativePath = opened.RelativePath,
-            HandoffFilePath = handoffRelativePath.Replace(Path.DirectorySeparatorChar, '/'),
+            HandoffFilePath = Path.GetRelativePath(repositoryRoot, fullPath).Replace(Path.DirectorySeparatorChar, '/'),
             ProjectBranch = answerContext.ProjectBranch,
             CurrentGoal = currentGoal,
             CurrentState = currentState,
@@ -779,8 +823,18 @@ public sealed class ValidationService(
         var config = await repositoryService.LoadConfigAsync(repositoryRoot, cancellationToken);
         var issues = new List<ValidationIssue>();
         var storageRoot = repositoryService.GetStorageRoot(repositoryRoot);
+        foreach (var reparsePoint in RepositoryPathGuard.EnumerateReparsePoints(storageRoot))
+        {
+            issues.Add(new ValidationIssue
+            {
+                Severity = ValidationSeverity.Error,
+                RelativePath = Path.GetRelativePath(storageRoot, reparsePoint).Replace(Path.DirectorySeparatorChar, '/'),
+                Message = "Symbolic links and reparse points are not allowed inside FractalMem storage.",
+            });
+        }
+
         var memoryFiles = EnumerateMemoryFiles(storageRoot)
-            .Where(path => !IsIgnoredValidationPath(storageRoot, path))
+            .Where(path => !IsIgnoredValidationPath(storageRoot, path, config.Handoffs.Directory))
             .ToArray();
         var filesByDirectory = memoryFiles
             .GroupBy(path => Path.GetDirectoryName(path), StringComparer.Ordinal)
@@ -847,12 +901,13 @@ public sealed class ValidationService(
                         issues.Add(new ValidationIssue { Severity = ValidationSeverity.Warning, RelativePath = relativePath, Message = $"{Path.GetFileName(memoryFile)} is empty." });
                     }
 
-                    if (string.IsNullOrWhiteSpace(document.Metadata.Title))
+                    var isMarkdown = Path.GetExtension(memoryFile).Equals(".md", StringComparison.OrdinalIgnoreCase);
+                    if ((config.Metadata.FrontMatter || !isMarkdown) && string.IsNullOrWhiteSpace(document.Metadata.Title))
                     {
                         issues.Add(new ValidationIssue { Severity = ValidationSeverity.Warning, RelativePath = relativePath, Message = $"{Path.GetFileName(memoryFile)} is missing a title." });
                     }
 
-                    if (Path.GetExtension(memoryFile).Equals(".md", StringComparison.OrdinalIgnoreCase) && document.Metadata.LastUpdated is null)
+                    if (config.Metadata.FrontMatter && isMarkdown && document.Metadata.LastUpdated is null)
                     {
                         issues.Add(new ValidationIssue { Severity = ValidationSeverity.Warning, RelativePath = relativePath, Message = $"{Path.GetFileName(memoryFile)} is missing last_updated." });
                     }
@@ -939,11 +994,12 @@ public sealed class ValidationService(
         }
     }
 
-    private static bool IsIgnoredValidationPath(string storageRoot, string path)
+    private static bool IsIgnoredValidationPath(string storageRoot, string path, string handoffDirectory)
     {
         var relative = Path.GetRelativePath(storageRoot, path).Replace(Path.DirectorySeparatorChar, '/');
         return relative.StartsWith("templates/", StringComparison.Ordinal) ||
             relative.StartsWith("handoffs/", StringComparison.Ordinal) ||
+            relative.StartsWith(handoffDirectory + "/", StringComparison.Ordinal) ||
             relative.StartsWith("indexes/", StringComparison.Ordinal) ||
             relative.Contains("/artifacts/", StringComparison.Ordinal);
     }

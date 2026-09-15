@@ -63,23 +63,24 @@ public sealed class IndexService(
         var aliasOutput = aliases.ToDictionary(pair => pair.Key, pair => (IReadOnlyList<string>)pair.Value.OrderBy(item => item, StringComparer.Ordinal).ToArray(), StringComparer.Ordinal);
         var tagOutput = tags.ToDictionary(pair => pair.Key, pair => (IReadOnlyList<string>)pair.Value.OrderBy(item => item, StringComparer.Ordinal).ToArray(), StringComparer.Ordinal);
 
-        var indexRoot = Path.Combine(repositoryService.GetStorageRoot(repositoryRoot), "indexes");
-        await fileSystemService.WriteAllTextAsync(Path.Combine(indexRoot, "aliases.yaml"), YamlSerializer.Serialize(aliasOutput), cancellationToken);
-        await fileSystemService.WriteAllTextAsync(Path.Combine(indexRoot, "tags.yaml"), YamlSerializer.Serialize(tagOutput), cancellationToken);
-        await fileSystemService.WriteAllTextAsync(Path.Combine(indexRoot, "paths.yaml"), YamlSerializer.Serialize(paths), cancellationToken);
+        var storageRoot = repositoryService.GetStorageRoot(repositoryRoot);
+        var indexRoot = RepositoryPathGuard.ResolveContainedPath(storageRoot, "indexes");
+        await fileSystemService.WriteAllTextAsync(RepositoryPathGuard.ResolveContainedPath(indexRoot, "aliases.yaml"), YamlSerializer.Serialize(aliasOutput), cancellationToken);
+        await fileSystemService.WriteAllTextAsync(RepositoryPathGuard.ResolveContainedPath(indexRoot, "tags.yaml"), YamlSerializer.Serialize(tagOutput), cancellationToken);
+        await fileSystemService.WriteAllTextAsync(RepositoryPathGuard.ResolveContainedPath(indexRoot, "paths.yaml"), YamlSerializer.Serialize(paths), cancellationToken);
 
-        var fingerprint = NodeService.ComputeNodeFingerprintForCache(fileSystemService, repositoryService.GetStorageRoot(repositoryRoot));
+        var fingerprint = NodeService.ComputeNodeFingerprintForCache(fileSystemService, storageRoot);
         await RefreshCacheAsync(indexRoot, nodes, fingerprint, cancellationToken);
     }
 
     private async Task RefreshCacheAsync(string indexRoot, IReadOnlyList<MemoryNode> nodes, string fingerprint, CancellationToken cancellationToken)
     {
-        var cacheRoot = Path.Combine(indexRoot, "cache");
-        var nodeCacheRoot = Path.Combine(cacheRoot, "nodes");
+        var cacheRoot = RepositoryPathGuard.ResolveContainedPath(indexRoot, "cache");
+        var nodeCacheRoot = RepositoryPathGuard.ResolveContainedPath(cacheRoot, "nodes");
         fileSystemService.CreateDirectory(cacheRoot);
         fileSystemService.CreateDirectory(nodeCacheRoot);
 
-        var manifestPath = Path.Combine(cacheRoot, "manifest.json");
+        var manifestPath = RepositoryPathGuard.ResolveContainedPath(cacheRoot, "manifest.json");
         var manifest = await LoadManifestAsync(manifestPath, cancellationToken);
         var nextEntries = new Dictionary<string, IndexCacheManifestEntry>(StringComparer.Ordinal);
 
@@ -88,12 +89,13 @@ public sealed class IndexService(
             var hashes = BuildFileHashes(node);
             var safeName = SanitizePath(node.RelativePath);
             var cacheFileName = $"{safeName}.json";
-            var cacheFilePath = Path.Combine(nodeCacheRoot, cacheFileName);
+            var cacheFilePath = RepositoryPathGuard.ResolveContainedPath(nodeCacheRoot, cacheFileName);
 
             if (manifest.Nodes.TryGetValue(node.RelativePath, out var existing) &&
+                NodeListingCacheReader.IsSafeCacheFileName(existing.CacheFile) &&
                 existing.FileHashes.Count == hashes.Count &&
                 HashesEqual(existing.FileHashes, hashes) &&
-                fileSystemService.FileExists(Path.Combine(nodeCacheRoot, existing.CacheFile)))
+                fileSystemService.FileExists(RepositoryPathGuard.ResolveContainedPath(nodeCacheRoot, existing.CacheFile)))
             {
                 nextEntries[node.RelativePath] = existing;
                 continue;
@@ -113,7 +115,10 @@ public sealed class IndexService(
 
         foreach (var stale in manifest.Nodes.Where(entry => !nextEntries.ContainsKey(entry.Key)))
         {
-            fileSystemService.DeleteFile(Path.Combine(nodeCacheRoot, stale.Value.CacheFile));
+            if (NodeListingCacheReader.IsSafeCacheFileName(stale.Value.CacheFile))
+            {
+                fileSystemService.DeleteFile(RepositoryPathGuard.ResolveContainedPath(nodeCacheRoot, stale.Value.CacheFile));
+            }
         }
 
         var nextManifest = new IndexCacheManifest
@@ -133,8 +138,15 @@ public sealed class IndexService(
             return new IndexCacheManifest();
         }
 
-        var json = await fileSystemService.ReadAllTextAsync(manifestPath, cancellationToken);
-        return JsonSerializer.Deserialize<IndexCacheManifest>(json, JsonOptions) ?? new IndexCacheManifest();
+        try
+        {
+            var json = await fileSystemService.ReadAllTextAsync(manifestPath, cancellationToken);
+            return JsonSerializer.Deserialize<IndexCacheManifest>(json, JsonOptions) ?? new IndexCacheManifest();
+        }
+        catch (JsonException)
+        {
+            return new IndexCacheManifest();
+        }
     }
 
     private NodeCacheDocument BuildCacheDocument(MemoryNode node, IReadOnlyDictionary<string, string> hashes)

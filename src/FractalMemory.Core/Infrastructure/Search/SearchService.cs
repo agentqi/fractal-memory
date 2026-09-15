@@ -1,5 +1,6 @@
 using FractalMemory.Core.Application.Services;
 using FractalMemory.Core.Domain.Models;
+using FractalMemory.Core.Infrastructure.Files;
 using FractalMemory.Core.Infrastructure.Parsing;
 using YamlDotNet.Serialization;
 
@@ -17,6 +18,10 @@ public sealed class SearchService(
     public async Task<IReadOnlyList<SearchResult>> SearchAsync(string workingDirectory, string query, CancellationToken cancellationToken, int? limit = null, string? scope = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(query);
+        if (limit is <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(limit), "Search limit must be a positive integer.");
+        }
 
         var repositoryRoot = repositoryService.FindRepositoryRoot(workingDirectory)
             ?? throw new InvalidOperationException("No FractalMemory repository found.");
@@ -70,15 +75,26 @@ public sealed class SearchService(
         string? scope,
         CancellationToken cancellationToken)
     {
+        if (limit <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(limit), "Recent item limit must be a positive integer.");
+        }
+
+        if (days < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(days), "Recent day range cannot be negative.");
+        }
+
         var repositoryRoot = repositoryService.FindRepositoryRoot(workingDirectory)
             ?? throw new InvalidOperationException("No FractalMemory repository found.");
+        var config = await repositoryService.LoadConfigAsync(repositoryRoot, cancellationToken);
         var storageRoot = repositoryService.GetStorageRoot(repositoryRoot);
         var cutoff = clock.UtcNow.AddDays(-days);
         var normalizedScope = NormalizeScope(scope);
         var pathTitles = await LoadPathTitlesAsync(storageRoot, cancellationToken);
         var latestByNode = new Dictionary<string, RecentNodeFile>(StringComparer.Ordinal);
 
-        foreach (var file in EnumerateRecentNodeFiles(storageRoot))
+        foreach (var file in EnumerateRecentNodeFiles(storageRoot, config.Handoffs.Directory))
         {
             cancellationToken.ThrowIfCancellationRequested();
             var directory = Path.GetDirectoryName(file);
@@ -197,6 +213,7 @@ public sealed class SearchService(
         foreach (var artifact in fileSystemService.EnumerateFiles(artifactsDirectory, "*", SearchOption.AllDirectories))
         {
             cancellationToken.ThrowIfCancellationRequested();
+            RepositoryPathGuard.EnsureContainedPath(node.FullPath, artifact);
             if (!IsSearchableArtifact(artifact))
             {
                 continue;
@@ -276,7 +293,7 @@ public sealed class SearchService(
 
     private async Task<IReadOnlyDictionary<string, string>> LoadPathTitlesAsync(string storageRoot, CancellationToken cancellationToken)
     {
-        var pathsIndex = Path.Combine(storageRoot, "indexes", "paths.yaml");
+        var pathsIndex = RepositoryPathGuard.ResolveContainedPath(storageRoot, "indexes/paths.yaml");
         if (!fileSystemService.FileExists(pathsIndex))
         {
             return new Dictionary<string, string>(StringComparer.Ordinal);
@@ -300,11 +317,12 @@ public sealed class SearchService(
         }
     }
 
-    private IEnumerable<string> EnumerateRecentNodeFiles(string storageRoot)
+    private IEnumerable<string> EnumerateRecentNodeFiles(string storageRoot, string handoffDirectory)
     {
         foreach (var path in fileSystemService.EnumerateFiles(storageRoot, "*", SearchOption.AllDirectories))
         {
-            if (!IsSearchableArtifact(path) || IsExcludedMemoryPath(storageRoot, path))
+            RepositoryPathGuard.EnsureContainedPath(storageRoot, path);
+            if (!IsSearchableArtifact(path) || IsExcludedMemoryPath(storageRoot, path, handoffDirectory))
             {
                 continue;
             }
@@ -316,12 +334,13 @@ public sealed class SearchService(
         }
     }
 
-    private static bool IsExcludedMemoryPath(string storageRoot, string path)
+    private static bool IsExcludedMemoryPath(string storageRoot, string path, string handoffDirectory)
     {
         var relative = Path.GetRelativePath(storageRoot, path).Replace(Path.DirectorySeparatorChar, '/');
         return relative.StartsWith("templates/", StringComparison.Ordinal) ||
             relative.StartsWith("archive/", StringComparison.Ordinal) ||
             relative.StartsWith("handoffs/", StringComparison.Ordinal) ||
+            relative.StartsWith(handoffDirectory + "/", StringComparison.Ordinal) ||
             relative.StartsWith("indexes/", StringComparison.Ordinal) ||
             relative.Contains("/artifacts/", StringComparison.Ordinal);
     }

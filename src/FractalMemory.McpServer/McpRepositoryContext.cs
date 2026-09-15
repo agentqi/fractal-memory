@@ -1,5 +1,6 @@
 using FractalMemory.Core.Application.Services;
 using FractalMemory.Core.Domain.Rules;
+using FractalMemory.Core.Infrastructure.Files;
 
 namespace FractalMemory.McpServer;
 
@@ -41,9 +42,7 @@ public sealed class McpRepositoryContext(IRepositoryService repositoryService) :
     public string GetStoragePath(string relativePath)
     {
         var storageRoot = repositoryService.GetStorageRoot(GetRepositoryRoot());
-        var candidate = Path.GetFullPath(Path.Combine(storageRoot, relativePath.Replace('/', Path.DirectorySeparatorChar)));
-        EnsureContained(storageRoot, candidate);
-        return candidate;
+        return RepositoryPathGuard.ResolveContainedPath(storageRoot, relativePath);
     }
 
     public string GetNodeFilePath(string encodedNodePath, string fileName)
@@ -75,17 +74,5 @@ public sealed class McpRepositoryContext(IRepositoryService repositoryService) :
             ? Environment.CurrentDirectory
             : configured.Trim();
         return Path.GetFullPath(startDirectory);
-    }
-
-    private static void EnsureContained(string rootPath, string candidatePath)
-    {
-        var normalizedRoot = Path.GetFullPath(rootPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-        var requiredPrefix = normalizedRoot + Path.DirectorySeparatorChar;
-        if (!candidatePath.Equals(normalizedRoot, comparison) &&
-            !candidatePath.StartsWith(requiredPrefix, comparison))
-        {
-            throw new InvalidOperationException("Requested path resolves outside the FractalMem repository.");
-        }
     }
 }

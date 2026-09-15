@@ -10,17 +10,39 @@ public sealed class LocalFileSystemService : IFileSystemService
 
     public void CreateDirectory(string path) => Directory.CreateDirectory(path);
 
-    public Task WriteAllTextAsync(string path, string content, CancellationToken cancellationToken) =>
-        File.WriteAllTextAsync(path, content, cancellationToken);
+    public async Task WriteAllTextAsync(string path, string content, CancellationToken cancellationToken)
+    {
+        var directory = Path.GetDirectoryName(path)
+            ?? throw new InvalidOperationException($"Cannot determine the parent directory for '{path}'.");
+        Directory.CreateDirectory(directory);
+
+        var temporaryPath = Path.Combine(directory, $".{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
+        try
+        {
+            await File.WriteAllTextAsync(temporaryPath, content, cancellationToken);
+            File.Move(temporaryPath, path, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(temporaryPath))
+            {
+                File.Delete(temporaryPath);
+            }
+        }
+    }
 
     public Task<string> ReadAllTextAsync(string path, CancellationToken cancellationToken) =>
         File.ReadAllTextAsync(path, cancellationToken);
 
     public IEnumerable<string> EnumerateDirectories(string path) =>
-        Directory.Exists(path) ? Directory.EnumerateDirectories(path) : [];
+        Directory.Exists(path)
+            ? Directory.EnumerateDirectories(path, "*", CreateEnumerationOptions(recurse: false))
+            : [];
 
     public IEnumerable<string> EnumerateFiles(string path, string searchPattern, SearchOption searchOption) =>
-        Directory.Exists(path) ? Directory.EnumerateFiles(path, searchPattern, searchOption) : [];
+        Directory.Exists(path)
+            ? Directory.EnumerateFiles(path, searchPattern, CreateEnumerationOptions(searchOption == SearchOption.AllDirectories))
+            : [];
 
     public DateTimeOffset GetLastWriteTimeUtc(string path)
     {
@@ -39,4 +61,12 @@ public sealed class LocalFileSystemService : IFileSystemService
             File.Delete(path);
         }
     }
+
+    private static EnumerationOptions CreateEnumerationOptions(bool recurse) => new()
+    {
+        RecurseSubdirectories = recurse,
+        AttributesToSkip = FileAttributes.ReparsePoint,
+        IgnoreInaccessible = false,
+        ReturnSpecialDirectories = false,
+    };
 }
