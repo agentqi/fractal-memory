@@ -127,7 +127,7 @@ public sealed class RepositoryService(
         }
 
         var defaultExportModeValue = GetString(data, "default_export_mode") ?? ExportMode.Compact.ToString();
-        if (!Enum.TryParse<ExportMode>(defaultExportModeValue, true, out var defaultExportMode))
+        if (!Enum.TryParse<ExportMode>(defaultExportModeValue, true, out var defaultExportMode) || !Enum.IsDefined(defaultExportMode))
         {
             throw new InvalidOperationException("Configuration value 'default_export_mode' must be compact, standard, or verbose.");
         }
@@ -212,6 +212,11 @@ public sealed class NodeService(
         CancellationToken cancellationToken,
         NodeFileFormat format = NodeFileFormat.Markdown)
     {
+        if (!Enum.IsDefined(format))
+        {
+            throw new ArgumentOutOfRangeException(nameof(format), "Node format must be Markdown or Html.");
+        }
+
         var repositoryRoot = repositoryService.FindRepositoryRoot(workingDirectory)
             ?? throw new InvalidOperationException("No FractalMemory repository found.");
 
@@ -223,10 +228,6 @@ public sealed class NodeService(
             throw new InvalidOperationException($"Node '{normalizedPath}' already exists.");
         }
 
-        fileSystemService.CreateDirectory(fullPath);
-        fileSystemService.CreateDirectory(Path.Combine(fullPath, "children"));
-        fileSystemService.CreateDirectory(Path.Combine(fullPath, "artifacts"));
-
         var config = await repositoryService.LoadConfigAsync(repositoryRoot, cancellationToken);
         var templates = await templateService.GetNodeTemplatesAsync(
             repositoryRoot,
@@ -234,9 +235,32 @@ public sealed class NodeService(
             format,
             config.Metadata.FrontMatter,
             cancellationToken);
-        foreach (var template in templates)
+        var stagingRelativePath = $".staging/{Guid.NewGuid():N}";
+        var stagingPath = RepositoryPathGuard.ResolveContainedPath(storageRoot, stagingRelativePath);
+        try
         {
-            await fileSystemService.WriteAllTextAsync(Path.Combine(fullPath, template.Key), template.Value + Environment.NewLine, cancellationToken);
+            fileSystemService.CreateDirectory(stagingPath);
+            fileSystemService.CreateDirectory(Path.Combine(stagingPath, "children"));
+            fileSystemService.CreateDirectory(Path.Combine(stagingPath, "artifacts"));
+            foreach (var template in templates)
+            {
+                var destination = RepositoryPathGuard.ResolveContainedPath(stagingPath, template.Key);
+                await fileSystemService.WriteAllTextAsync(destination, template.Value + Environment.NewLine, cancellationToken);
+            }
+
+            // Parse the entire staged node before making it visible to repository readers.
+            await LoadNodeAsync(repositoryRoot, stagingRelativePath, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            fileSystemService.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+            RepositoryPathGuard.EnsureContainedPath(storageRoot, fullPath);
+            fileSystemService.MoveDirectory(stagingPath, fullPath);
+        }
+        finally
+        {
+            if (fileSystemService.DirectoryExists(stagingPath))
+            {
+                fileSystemService.DeleteDirectory(stagingPath);
+            }
         }
 
         return await LoadNodeAsync(repositoryRoot, normalizedPath, cancellationToken);
@@ -250,51 +274,55 @@ public sealed class NodeService(
         return await LoadNodeAsync(repositoryRoot, normalizedPath, cancellationToken);
     }
 
-    public async Task<IReadOnlyList<MemoryNode>> GetAllNodesAsync(string repositoryRoot, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<MemoryNode>> GetAllNodesAsync(
+        string repositoryRoot, CancellationToken cancellationToken, bool bypassCache = false, string? scope = null)
     {
         var storageRoot = repositoryService.GetStorageRoot(repositoryRoot);
-        var fingerprint = ComputeNodeFingerprint(storageRoot);
+        var config = await repositoryService.LoadConfigAsync(repositoryRoot, cancellationToken);
+        var scopedRoot = scope is null ? storageRoot : RepositoryPathGuard.ResolveContainedPath(storageRoot, scope);
+        var fingerprint = scope is null ? ComputeNodeFingerprintForCache(fileSystemService, storageRoot, config.Handoffs.Directory) : null;
         var cacheKey = Path.GetFullPath(repositoryRoot);
-        if (_nodeListingCache.TryGetValue(cacheKey, out var cached) && string.Equals(cached.Fingerprint, fingerprint, StringComparison.Ordinal))
+        var useCache = !bypassCache && scope is null && config.Indexing.Enabled;
+        if (useCache && _nodeListingCache.TryGetValue(cacheKey, out var cached) && string.Equals(cached.Fingerprint, fingerprint, StringComparison.Ordinal))
         {
             return cached.Nodes;
         }
 
-        var fromDiskCache = await cacheReader.TryLoadAsync(repositoryRoot, fingerprint, cancellationToken);
+        var fromDiskCache = useCache ? await cacheReader.TryLoadAsync(repositoryRoot, fingerprint!, cancellationToken) : null;
         if (fromDiskCache is not null)
         {
-            _nodeListingCache[cacheKey] = new NodeListingCacheEntry(fingerprint, fromDiskCache);
+            _nodeListingCache[cacheKey] = new NodeListingCacheEntry(fingerprint!, fromDiskCache);
             return fromDiskCache;
         }
 
-        var directories = EnumerateNodeIndexFiles(storageRoot)
+        var directories = EnumerateNodeIndexFiles(scopedRoot)
             .Select(Path.GetDirectoryName)
             .Where(path => !string.IsNullOrWhiteSpace(path))
             .Cast<string>()
             .Distinct(StringComparer.Ordinal)
-            .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}templates{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
-                && !path.Contains($"{Path.DirectorySeparatorChar}archive{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+            .Where(path => !IsExcludedNodeContent(storageRoot, path, config.Handoffs.Directory))
             .ToArray();
 
         var nodes = new List<MemoryNode>(directories.Length);
         foreach (var directory in directories)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var relativePath = Path.GetRelativePath(storageRoot, directory).Replace(Path.DirectorySeparatorChar, '/');
             nodes.Add(await LoadNodeAsync(repositoryRoot, relativePath, cancellationToken));
         }
 
         var ordered = nodes.OrderBy(node => node.RelativePath, StringComparer.Ordinal).ToArray();
-        _nodeListingCache[cacheKey] = new NodeListingCacheEntry(fingerprint, ordered);
+        if (scope is null && config.Indexing.Enabled)
+        {
+            _nodeListingCache[cacheKey] = new NodeListingCacheEntry(fingerprint!, ordered);
+        }
         return ordered;
     }
 
-    private string ComputeNodeFingerprint(string storageRoot) =>
-        ComputeNodeFingerprintForCache(fileSystemService, storageRoot);
-
-    internal static string ComputeNodeFingerprintForCache(IFileSystemService fileSystem, string storageRoot)
+    internal static string ComputeNodeFingerprintForCache(IFileSystemService fileSystem, string storageRoot, string handoffDirectory = "handoffs")
     {
         var entries = new SortedDictionary<string, long>(StringComparer.Ordinal);
-        foreach (var file in EnumerateNodeFingerprintFilesStatic(fileSystem, storageRoot))
+        foreach (var file in EnumerateNodeFingerprintFilesStatic(fileSystem, storageRoot, handoffDirectory))
         {
             RepositoryPathGuard.EnsureContainedPath(storageRoot, file);
             var relative = Path.GetRelativePath(storageRoot, file).Replace(Path.DirectorySeparatorChar, '/');
@@ -316,7 +344,7 @@ public sealed class NodeService(
         return $"{entries.Count}:{Convert.ToHexString(hash)}";
     }
 
-    private static IEnumerable<string> EnumerateNodeFingerprintFilesStatic(IFileSystemService fileSystem, string storageRoot)
+    private static IEnumerable<string> EnumerateNodeFingerprintFilesStatic(IFileSystemService fileSystem, string storageRoot, string handoffDirectory)
     {
         foreach (var path in fileSystem.EnumerateFiles(storageRoot, "*", SearchOption.AllDirectories))
         {
@@ -325,16 +353,21 @@ public sealed class NodeService(
                 continue;
             }
 
-            if (path.Contains($"{Path.DirectorySeparatorChar}templates{Path.DirectorySeparatorChar}", StringComparison.Ordinal) ||
-                path.Contains($"{Path.DirectorySeparatorChar}archive{Path.DirectorySeparatorChar}", StringComparison.Ordinal) ||
-                path.Contains($"{Path.DirectorySeparatorChar}handoffs{Path.DirectorySeparatorChar}", StringComparison.Ordinal) ||
-                path.Contains($"{Path.DirectorySeparatorChar}indexes{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+            if (IsExcludedNodeContent(storageRoot, path, handoffDirectory))
             {
                 continue;
             }
 
             yield return path;
         }
+    }
+
+    internal static bool IsExcludedNodeContent(string storageRoot, string path, string handoffDirectory)
+    {
+        var relative = Path.GetRelativePath(storageRoot, path).Replace(Path.DirectorySeparatorChar, '/');
+        return new[] { "templates", "archive", "handoffs", "indexes", ".staging", handoffDirectory }
+            .Any(prefix => relative == prefix || relative.StartsWith(prefix + "/", StringComparison.Ordinal)) ||
+            relative.Split('/').Contains("artifacts", StringComparer.Ordinal);
     }
 
     internal static bool IsContentExtension(string path)
@@ -404,6 +437,20 @@ public sealed class NodeService(
             StateContent = state.Content,
             TimelineContent = timeline.Content,
             DecisionsContent = decisions.Content,
+            SourceHashes = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [Path.GetFileName(indexPath)] = index.SourceHash,
+                [statePath is null ? "state.md" : Path.GetFileName(statePath)] = state.SourceHash,
+                [timelinePath is null ? "timeline.md" : Path.GetFileName(timelinePath)] = timeline.SourceHash,
+                [decisionsPath is null ? "decisions.md" : Path.GetFileName(decisionsPath)] = decisions.SourceHash,
+            },
+            SourceStartLines = new Dictionary<string, int>(StringComparer.Ordinal)
+            {
+                [Path.GetFileName(indexPath)] = index.ContentStartLine,
+                [statePath is null ? "state.md" : Path.GetFileName(statePath)] = state.ContentStartLine,
+                [timelinePath is null ? "timeline.md" : Path.GetFileName(timelinePath)] = timeline.ContentStartLine,
+                [decisionsPath is null ? "decisions.md" : Path.GetFileName(decisionsPath)] = decisions.ContentStartLine,
+            },
         };
     }
 
@@ -474,6 +521,7 @@ public sealed class NodeService(
             {
                 Metadata = new NodeMetadata { Title = title },
                 Content = HtmlTextExtractor.ToText(html),
+                SourceHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(html))),
             };
         }
 
@@ -506,6 +554,15 @@ public sealed class ReadService(
         NodeViewType view,
         CancellationToken cancellationToken)
     {
+        if (!Enum.IsDefined(depth))
+        {
+            throw new ArgumentOutOfRangeException(nameof(depth), "Retrieval depth must be between 0 and 3.");
+        }
+        if (!Enum.IsDefined(view))
+        {
+            throw new ArgumentOutOfRangeException(nameof(view), "Unknown node view.");
+        }
+
         var repositoryRoot = repositoryService.FindRepositoryRoot(workingDirectory)
             ?? throw new InvalidOperationException("No FractalMemory repository found.");
         var node = await nodeService.GetNodeAsync(repositoryRoot, nodePath, cancellationToken);
@@ -523,6 +580,11 @@ public sealed class ReadService(
         var showState = depth >= RetrievalDepth.Working || view == NodeViewType.State;
         var showTimeline = depth >= RetrievalDepth.Deep || view == NodeViewType.Timeline;
         var showDecisions = depth >= RetrievalDepth.Deep || view == NodeViewType.Decisions;
+        var currentState = showState
+            ? depth == RetrievalDepth.Deep || view == NodeViewType.State
+                ? node.StateContent
+                : SummarizeWorkingState(node.StateContent)
+            : null;
 
         return new OpenNodeResult
         {
@@ -534,14 +596,28 @@ public sealed class ReadService(
             IndexSummary = showIndex
                 ? TrimToParagraphs(node.IndexContent, depth == RetrievalDepth.Working ? 2 : 3)
                 : null,
-            CurrentState = showState
-                ? TrimToParagraphs(node.StateContent, depth == RetrievalDepth.Deep ? 3 : 2)
-                : null,
+            CurrentState = currentState,
+            StateTruncated = showState && currentState?.Trim() != node.StateContent.Trim(),
             Children = children.Select(child => $"{child.RelativePath} - {child.Metadata.Summary ?? ExtractSummary(child.IndexContent) ?? child.Metadata.Title ?? Path.GetFileName(child.RelativePath)}").ToArray(),
             SuggestedReads = BuildSuggestedReads(node, children),
             RecentTimeline = showTimeline ? ExtractHighlights(node.TimelineContent, 3) : [],
             RecentDecisions = showDecisions ? ExtractHighlights(node.DecisionsContent, 3) : [],
         };
+    }
+
+    private static string SummarizeWorkingState(string content)
+    {
+        var sections = FractalMemory.Core.Infrastructure.Search.RetrievalPipeline.ParseSections(content);
+        var priorities = new[] { "Current Objective", "Current Goal", "Current State", "Active Constraints",
+            "Next Best Actions", "Key Decisions in Force", "Open Questions" };
+        var selected = sections
+            .Where(section => priorities.Contains(section.Heading, StringComparer.OrdinalIgnoreCase) &&
+                section.Lines.Any(line => !string.IsNullOrWhiteSpace(line)))
+            .OrderBy(section => Array.FindIndex(priorities, heading => heading.Equals(section.Heading, StringComparison.OrdinalIgnoreCase)))
+            .Take(3)
+            .Select(section => $"## {section.Heading}{Environment.NewLine}{Environment.NewLine}{string.Join(Environment.NewLine, section.Lines).Trim()}")
+            .ToArray();
+        return selected.Length == 0 ? TrimToParagraphs(content, 2) : string.Join(Environment.NewLine + Environment.NewLine, selected);
     }
 
     private static IReadOnlyList<string> BuildSuggestedReads(MemoryNode node, IReadOnlyList<MemoryNode> children)
@@ -626,6 +702,11 @@ public sealed class ExportService(
         ExportMode mode,
         CancellationToken cancellationToken)
     {
+        if (!Enum.IsDefined(mode))
+        {
+            throw new ArgumentOutOfRangeException(nameof(mode), "Export mode must be Compact, Standard, or Verbose.");
+        }
+
         var depth = mode switch
         {
             ExportMode.Compact => RetrievalDepth.Orientation,
@@ -843,8 +924,14 @@ public sealed class ValidationService(
                 group => group.Key!,
                 group => BuildNodeFileMap(group),
                 StringComparer.Ordinal);
+        foreach (var directory in EnumerateNodeScaffolds(storageRoot, config.Handoffs.Directory))
+        {
+            filesByDirectory.TryAdd(directory, new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase));
+        }
         var candidateDirectories = filesByDirectory
-            .Where(pair => pair.Value.ContainsKey("index") || pair.Value.ContainsKey("state"))
+            .Where(pair => pair.Value.Count > 0 ||
+                fileSystemService.DirectoryExists(Path.Combine(pair.Key, "children")) ||
+                fileSystemService.DirectoryExists(Path.Combine(pair.Key, "artifacts")))
             .Select(pair => pair.Key)
             .ToArray();
 
@@ -994,10 +1081,33 @@ public sealed class ValidationService(
         }
     }
 
+    private IEnumerable<string> EnumerateNodeScaffolds(string storageRoot, string handoffDirectory)
+    {
+        var pending = new Stack<string>();
+        pending.Push(storageRoot);
+        while (pending.TryPop(out var directory))
+        {
+            var children = fileSystemService.EnumerateDirectories(directory).ToArray();
+            if (children.Any(child => Path.GetFileName(child) is "children" or "artifacts"))
+            {
+                yield return directory;
+            }
+
+            foreach (var child in children)
+            {
+                if (!IsIgnoredValidationPath(storageRoot, Path.Combine(child, "_"), handoffDirectory))
+                {
+                    pending.Push(child);
+                }
+            }
+        }
+    }
+
     private static bool IsIgnoredValidationPath(string storageRoot, string path, string handoffDirectory)
     {
         var relative = Path.GetRelativePath(storageRoot, path).Replace(Path.DirectorySeparatorChar, '/');
         return relative.StartsWith("templates/", StringComparison.Ordinal) ||
+            relative.StartsWith(".staging/", StringComparison.Ordinal) ||
             relative.StartsWith("handoffs/", StringComparison.Ordinal) ||
             relative.StartsWith(handoffDirectory + "/", StringComparison.Ordinal) ||
             relative.StartsWith("indexes/", StringComparison.Ordinal) ||

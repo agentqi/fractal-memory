@@ -56,6 +56,8 @@ public sealed class MemoryNode
     public string StateContent { get; init; } = string.Empty;
     public string TimelineContent { get; init; } = string.Empty;
     public string DecisionsContent { get; init; } = string.Empty;
+    public IReadOnlyDictionary<string, string> SourceHashes { get; init; } = new Dictionary<string, string>();
+    public IReadOnlyDictionary<string, int> SourceStartLines { get; init; } = new Dictionary<string, int>();
 }
 
 public sealed class NodeMetadata
@@ -109,6 +111,7 @@ public sealed class OpenNodeResult
     public NodeViewType View { get; init; }
     public string? IndexSummary { get; init; }
     public string? CurrentState { get; init; }
+    public bool StateTruncated { get; init; }
     public IReadOnlyList<string> Children { get; init; } = [];
     public IReadOnlyList<string> SuggestedReads { get; init; } = [];
     public IReadOnlyList<string> RecentTimeline { get; init; } = [];
@@ -147,6 +150,8 @@ public sealed class ParsedMarkdownDocument
     public required NodeMetadata Metadata { get; init; }
     public required string Content { get; init; }
     public bool HasFrontMatter { get; init; }
+    public int ContentStartLine { get; init; } = 1;
+    public string SourceHash { get; init; } = string.Empty;
 }
 
 public sealed class ExportDocument

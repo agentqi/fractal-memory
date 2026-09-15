@@ -4,6 +4,8 @@ namespace FractalMemory.Core.Infrastructure.Indexing;
 
 internal sealed class IndexCacheManifest
 {
+    public const int CurrentFormatVersion = 2;
+    public int FormatVersion { get; set; }
     public DateTimeOffset RefreshedAt { get; set; }
     public string Fingerprint { get; set; } = string.Empty;
     public Dictionary<string, IndexCacheManifestEntry> Nodes { get; set; } = new(StringComparer.Ordinal);
@@ -12,12 +14,14 @@ internal sealed class IndexCacheManifest
 internal sealed class IndexCacheManifestEntry
 {
     public string CacheFile { get; set; } = string.Empty;
+    public string CacheHash { get; set; } = string.Empty;
     public Dictionary<string, string> FileHashes { get; set; } = new(StringComparer.Ordinal);
     public DateTimeOffset CachedAt { get; set; }
 }
 
 internal sealed class NodeCacheDocument
 {
+    public Dictionary<string, int> SourceStartLines { get; set; } = new(StringComparer.Ordinal);
     public string RelativePath { get; set; } = string.Empty;
     public NodeMetadata Metadata { get; set; } = new();
     public StructuredMemoryFields StateSchema { get; set; } = new();

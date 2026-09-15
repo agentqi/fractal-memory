@@ -1,5 +1,6 @@
 using FractalMemory.Core.Application.Services;
 using FractalMemory.Core.Domain.Models;
+using FractalMemory.Core.Domain.Rules;
 using FractalMemory.Core.Infrastructure.Files;
 using FractalMemory.Core.Infrastructure.Parsing;
 using YamlDotNet.Serialization;
@@ -26,11 +27,8 @@ public sealed class SearchService(
         var repositoryRoot = repositoryService.FindRepositoryRoot(workingDirectory)
             ?? throw new InvalidOperationException("No FractalMemory repository found.");
         var config = await repositoryService.LoadConfigAsync(repositoryRoot, cancellationToken);
-        var allNodes = await nodeService.GetAllNodesAsync(repositoryRoot, cancellationToken);
         var normalizedScope = NormalizeScope(scope);
-        var nodes = normalizedScope is null
-            ? (IReadOnlyList<MemoryNode>)allNodes
-            : allNodes.Where(node => MatchesScope(node.RelativePath, normalizedScope)).ToArray();
+        var nodes = await nodeService.GetAllNodesAsync(repositoryRoot, cancellationToken, scope: normalizedScope);
         var profile = RetrievalPipeline.BuildQueryProfile(query);
 
         var perNodeBests = new SearchResult?[nodes.Count];
@@ -167,8 +165,8 @@ public sealed class SearchService(
             {
                 RelativePath = node.RelativePath,
                 Title = title,
-                MatchedFile = "index.md",
-                SourcePath = $"{node.RelativePath}/index.md",
+                MatchedFile = node.IndexFileName,
+                SourcePath = $"{node.RelativePath}/{node.IndexFileName}",
                 Snippet = title,
                 Score = 900,
                 ScoreBreakdown = new Dictionary<string, int>(StringComparer.Ordinal) { ["exact_title"] = 900 },
@@ -181,8 +179,8 @@ public sealed class SearchService(
             {
                 RelativePath = node.RelativePath,
                 Title = title,
-                MatchedFile = "index.md",
-                SourcePath = $"{node.RelativePath}/index.md",
+                MatchedFile = node.IndexFileName,
+                SourcePath = $"{node.RelativePath}/{node.IndexFileName}",
                 Snippet = $"Alias match: {query}",
                 Score = 820,
                 ScoreBreakdown = new Dictionary<string, int>(StringComparer.Ordinal) { ["alias"] = 820 },
@@ -195,8 +193,8 @@ public sealed class SearchService(
             {
                 RelativePath = node.RelativePath,
                 Title = title,
-                MatchedFile = "index.md",
-                SourcePath = $"{node.RelativePath}/index.md",
+                MatchedFile = node.IndexFileName,
+                SourcePath = $"{node.RelativePath}/{node.IndexFileName}",
                 Snippet = $"Tag match: {query}",
                 Score = 760,
                 ScoreBreakdown = new Dictionary<string, int>(StringComparer.Ordinal) { ["tag"] = 760 },
@@ -251,7 +249,7 @@ public sealed class SearchService(
         }
 
         var normalized = scope.Trim().Replace('\\', '/').Trim('/');
-        return normalized.Length == 0 ? null : normalized;
+        return normalized.Length == 0 ? null : NodePathRules.Normalize(normalized.ToLowerInvariant());
     }
 
     private static bool MatchesScope(string relativePath, string scope)
@@ -277,8 +275,8 @@ public sealed class SearchService(
             SourcePath = candidate.SourcePath,
             Snippet = candidate.Snippet.Length > 240 ? candidate.Snippet[..240] + "..." : candidate.Snippet,
             SectionHeading = candidate.SectionHeading,
-            StartLine = candidate.StartLine,
-            EndLine = candidate.EndLine,
+            StartLine = RetrievalPipeline.ToSourceLine(node, candidate.MatchedFile, candidate.StartLine),
+            EndLine = RetrievalPipeline.ToSourceLine(node, candidate.MatchedFile, candidate.EndLine),
             Score = candidate.Score,
             ScoreBreakdown = candidate.Breakdown,
         }).ToArray();

@@ -28,7 +28,7 @@ public sealed class HumanFormatter : IHumanFormatter
         if (!string.IsNullOrWhiteSpace(result.CurrentState))
         {
             builder.AppendLine();
-            builder.AppendLine("State");
+            builder.AppendLine(result.StateTruncated ? "State (abridged; use --view state for the full document)" : "State");
             builder.AppendLine(result.CurrentState);
         }
 

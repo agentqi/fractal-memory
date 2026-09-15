@@ -10,6 +10,10 @@ public sealed class LocalFileSystemService : IFileSystemService
 
     public void CreateDirectory(string path) => Directory.CreateDirectory(path);
 
+    public void MoveDirectory(string sourcePath, string destinationPath) => Directory.Move(sourcePath, destinationPath);
+
+    public void DeleteDirectory(string path) => Directory.Delete(path, recursive: true);
+
     public async Task WriteAllTextAsync(string path, string content, CancellationToken cancellationToken)
     {
         var directory = Path.GetDirectoryName(path)

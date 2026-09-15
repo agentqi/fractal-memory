@@ -80,6 +80,19 @@ IFS= read -r -t 15 validation_response <&4
 grep -Fq 'hasErrors' <<<"$validation_response"
 grep -Fq 'false' <<<"$validation_response"
 
+printf '%s\n' \
+  '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"memory_open","arguments":{"path":"projects/package-smoke","depth":3,"view":"State"}}}' \
+  >&3
+IFS= read -r -t 15 state_response <&4
+grep -Fq 'Current Objective' <<<"$state_response"
+grep -Fq 'Active Constraints' <<<"$state_response"
+grep -Fq 'Next Best Actions' <<<"$state_response"
+
+printf '%s\n' \
+  '{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"memory_open","arguments":{"path":"projects/package-smoke","depth":999}}}' \
+  >&3
+IFS= read -r -t 15 invalid_depth_response <&4
+grep -Fq '"isError":true' <<<"$invalid_depth_response"
 
 cleanup_server
 printf 'Package smoke test passed for FractalMem %s.\n' "$version"

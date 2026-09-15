@@ -6,6 +6,35 @@ namespace FractalMemory.Cli.Tests;
 
 public sealed class ConfigurationCommandTests
 {
+    [Theory]
+    [InlineData("open", "root", "--depth", "999")]
+    [InlineData("open", "root", "--depth", "-1")]
+    [InlineData("open", "root", "--view", "999")]
+    [InlineData("export", "root", "--mode", "999")]
+    [InlineData("node", "create", "projects/invalid", "--format", "999")]
+    public async Task UndefinedEnumArgumentsReturnUserErrors(params string[] arguments)
+    {
+        using var provider = CreateProvider();
+        var temp = CreateTempDirectory();
+        var originalDirectory = Environment.CurrentDirectory;
+        var originalError = Console.Error;
+        using var errors = new StringWriter();
+        try
+        {
+            Environment.CurrentDirectory = temp;
+            Console.SetError(errors);
+            Assert.Equal(0, await CliRunner.RunAsync(["init"], provider));
+            Assert.Equal(CliExitCodes.UserError, await CliRunner.RunAsync(arguments, provider));
+            Assert.Contains("Error:", errors.ToString(), StringComparison.Ordinal);
+        }
+        finally
+        {
+            Console.SetError(originalError);
+            Environment.CurrentDirectory = originalDirectory;
+            Directory.Delete(temp, recursive: true);
+        }
+    }
+
     [Fact]
     public async Task OpenAndExportHonorConfiguredDefaults()
     {

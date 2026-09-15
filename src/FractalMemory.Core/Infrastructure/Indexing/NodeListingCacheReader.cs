@@ -36,7 +36,9 @@ public sealed class NodeListingCacheReader(
             return null;
         }
 
-        if (manifest is null || !string.Equals(manifest.Fingerprint, fingerprint, StringComparison.Ordinal))
+        if (manifest is null || manifest.Nodes is null ||
+            manifest.FormatVersion != IndexCacheManifest.CurrentFormatVersion ||
+            !string.Equals(manifest.Fingerprint, fingerprint, StringComparison.Ordinal))
         {
             return null;
         }
@@ -61,7 +63,7 @@ public sealed class NodeListingCacheReader(
                 return null;
             }
 
-            if (!IsSafeCacheFileName(entry.CacheFile))
+            if (entry is null || !IsSafeCacheFileName(entry.CacheFile))
             {
                 return null;
             }
@@ -81,6 +83,10 @@ public sealed class NodeListingCacheReader(
             try
             {
                 var json = await fileSystemService.ReadAllTextAsync(cacheFilePath, cancellationToken);
+                if (IndexService.Hash(json) != entry.CacheHash)
+                {
+                    return null;
+                }
                 document = JsonSerializer.Deserialize<NodeCacheDocument>(json, IndexService.JsonOptions);
             }
             catch (JsonException)
@@ -88,7 +94,7 @@ public sealed class NodeListingCacheReader(
                 return null;
             }
 
-            if (document is null)
+            if (document is null || !IsValidDocument(document))
             {
                 return null;
             }
@@ -104,6 +110,8 @@ public sealed class NodeListingCacheReader(
                 RelativePath = normalizedPath,
                 FullPath = fullPath,
                 Metadata = document.Metadata,
+                SourceHashes = document.FileHashes,
+                SourceStartLines = document.SourceStartLines,
                 IndexFileName = document.IndexFileName,
                 StateFileName = document.StateFileName,
                 TimelineFileName = document.TimelineFileName,
@@ -116,6 +124,23 @@ public sealed class NodeListingCacheReader(
         }
 
         return nodes.OrderBy(node => node.RelativePath, StringComparer.Ordinal).ToArray();
+    }
+
+    private static bool IsValidDocument(NodeCacheDocument document)
+    {
+        if (document.Metadata is null || document.Metadata.Aliases is null || document.Metadata.Tags is null ||
+            document.Files is null || document.FileHashes is null || document.SourceStartLines is null)
+        {
+            return false;
+        }
+
+        var files = new[] { ("index", document.IndexFileName), ("state", document.StateFileName),
+            ("timeline", document.TimelineFileName), ("decisions", document.DecisionsFileName) };
+        return files.All(file =>
+            new[] { ".md", ".html", ".htm" }.Any(extension => file.Item2 == file.Item1 + extension) &&
+            document.Files.TryGetValue(file.Item2, out var content) && content?.RawContent is not null &&
+            document.FileHashes.ContainsKey(file.Item2) &&
+            document.SourceStartLines.TryGetValue(file.Item2, out var startLine) && startLine > 0);
     }
 
     internal static bool IsSafeCacheFileName(string fileName)

@@ -186,6 +186,15 @@ Each created node contains:
 - `index refresh` rebuilds aliases, tags, and paths from filesystem truth.
 - `validate` reports hard errors and warnings for structure, metadata, and stale indexes.
 
+### Retrieval and recovery
+
+- `open --view state` and depth `3` include the complete state document. Depth `2` selects populated working sections and marks an abridged state explicitly (`stateTruncated` in MCP results).
+- Markdown search and export citations use original file line numbers, including front matter. HTML retains headings and lists for structured retrieval; HTML citations include paths and section headings without generated line numbers.
+- Scoped searches load only the requested branch, so malformed content in another branch does not block them.
+- Node creation validates configuration and stages a complete, parsed node before publishing it. Failed writes clean up their staging directory; validation reports incomplete scaffolds left by older versions.
+- `index refresh` reads source documents, includes front matter in cache invalidation, and repairs damaged caches. Older cache formats are ignored on reads and upgraded on the next refresh. Unchanged valid cache files retain their modification times.
+- Undefined numeric depth, view, format, and export-mode values are rejected.
+
 ## Run The Optional MCP Server
 
 The MCP server is optional. The CLI does not depend on it.

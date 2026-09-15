@@ -154,7 +154,7 @@ internal static partial class RetrievalPipeline
 
             foreach (var item in selected)
             {
-                var startLine = Math.Max(section.StartLine, item.LineNumber - 1);
+                var startLine = Math.Max(section.StartLine, item.LineNumber - Math.Min(1, maxSnippetLines - 1));
                 var endLine = Math.Min(section.EndLine, startLine + maxSnippetLines - 1);
                 var snippetLines = section.Lines.Skip(startLine - section.StartLine).Take(endLine - startLine + 1)
                     .Where(line => !string.IsNullOrWhiteSpace(line))
@@ -219,17 +219,22 @@ internal static partial class RetrievalPipeline
             return;
         }
 
-        var sections = ParseSections(content);
-        var section = sections.FirstOrDefault(item => item.Heading.Contains(preferredHeading, StringComparison.OrdinalIgnoreCase))
-            ?? sections.FirstOrDefault(item => item.Lines.Any(line => !string.IsNullOrWhiteSpace(line)));
+        var sections = ParseSections(content)
+            .Where(item => item.Lines.Any(line => !string.IsNullOrWhiteSpace(line)))
+            .ToArray();
+        var section = preferredHeading == "Current State"
+            ? sections.FirstOrDefault(item => item.Heading.Equals("Current Objective", StringComparison.OrdinalIgnoreCase) ||
+                item.Heading.Equals("Current Goal", StringComparison.OrdinalIgnoreCase))
+            : null;
+        section ??= sections.FirstOrDefault(item => item.Heading.Contains(preferredHeading, StringComparison.OrdinalIgnoreCase))
+            ?? sections.FirstOrDefault();
         if (section is null)
         {
             return;
         }
 
-        var lines = section.Lines
-            .Select(line => line.Trim())
-            .Where(line => !string.IsNullOrWhiteSpace(line))
+        var startOffset = section.Lines.TakeWhile(string.IsNullOrWhiteSpace).Count();
+        var lines = section.Lines.Skip(startOffset)
             .Take(maxSnippetLines)
             .ToArray();
         if (lines.Length == 0)
@@ -243,16 +248,27 @@ internal static partial class RetrievalPipeline
             Title = title,
             MatchedFile = fileName,
             SourcePath = $"{node.RelativePath}/{fileName}",
-            Snippet = string.Join(Environment.NewLine, lines),
+            Snippet = string.Join(Environment.NewLine, lines).TrimEnd(),
             SectionHeading = section.Heading,
-            StartLine = section.StartLine,
-            EndLine = Math.Min(section.EndLine, section.StartLine + lines.Length - 1),
+            StartLine = ToSourceLine(node, fileName, section.StartLine + startOffset),
+            EndLine = ToSourceLine(node, fileName, section.StartLine + startOffset + lines.Length - 1),
             Score = filePrior,
             ScoreBreakdown = new Dictionary<string, int>(StringComparer.Ordinal)
             {
                 ["file_type_prior"] = filePrior,
             },
         });
+    }
+
+    internal static int? ToSourceLine(MemoryNode node, string fileName, int line)
+    {
+        // HTML is converted to semantic text; its generated line numbers are not source coordinates.
+        if (!Path.GetExtension(fileName).Equals(".md", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        return line + (node.SourceStartLines.TryGetValue(fileName, out var firstLine) ? firstLine - 1 : 0);
     }
 
     private static IReadOnlyList<(int LineNumber, int Score)> ScoreSectionLines(RetrievalQueryProfile profile, MarkdownSection section)
