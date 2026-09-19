@@ -184,7 +184,7 @@ public sealed class RepositoryService(
 
     private static IReadOnlyDictionary<object, object?>? GetSection(IReadOnlyDictionary<object, object?> source, string key)
     {
-        if (!source.TryGetValue(key, out var section)) return null;
+        if (!source.TryGetValue(key, out var section) || section is null) return null;
         return section as IReadOnlyDictionary<object, object?>
             ?? throw new InvalidOperationException($"Configuration section '{key}' must be a mapping.");
     }
@@ -195,8 +195,12 @@ public sealed class RepositoryService(
     private static bool? GetBool(IReadOnlyDictionary<object, object?> source, string key)
     {
         if (!source.TryGetValue(key, out var value)) return null;
-        return bool.TryParse(value?.ToString(), out var parsed) ? parsed
-            : throw new InvalidOperationException($"Configuration value '{key}' must be true or false.");
+        return value?.ToString()?.ToLowerInvariant() switch
+        {
+            "true" or "yes" or "on" or "y" => true,
+            "false" or "no" or "off" or "n" => false,
+            _ => throw new InvalidOperationException($"Configuration value '{key}' must be a YAML boolean."),
+        };
     }
 
     private static int? GetInt(IReadOnlyDictionary<object, object?> source, string key)
@@ -256,7 +260,7 @@ public sealed class NodeService(
         var allDocuments = new Dictionary<string, string>(templates, StringComparer.Ordinal);
         foreach (var document in documents ?? new Dictionary<string, string>())
         {
-            if (document.Key != "index.md" && !Regex.IsMatch(document.Key, @"^artifacts/source\.(md|html|htm|txt)$"))
+            if (document.Key != "index.md" && !ImportedSourceRules.IsSourceArtifact(document.Key))
                 throw new ArgumentException("Creation overrides support index.md and artifacts/source documents only.");
             allDocuments[document.Key] = document.Value;
         }
@@ -270,7 +274,8 @@ public sealed class NodeService(
             foreach (var template in allDocuments)
             {
                 var destination = RepositoryPathGuard.ResolveContainedPath(stagingPath, template.Key);
-                await fileSystemService.WriteAllTextAsync(destination, template.Value, cancellationToken);
+                var content = documents?.ContainsKey(template.Key) == true ? template.Value : template.Value.TrimEnd('\r', '\n') + Environment.NewLine;
+                await fileSystemService.WriteAllTextAsync(destination, content, cancellationToken);
             }
 
             // Parse the entire staged node before making it visible to repository readers.
@@ -1027,6 +1032,8 @@ public sealed class ValidationService(
                 try
                 {
                     var document = await ReadMemoryFileAsync(memoryFile, cancellationToken);
+                    if (Path.GetFileNameWithoutExtension(memoryFile) == "decisions")
+                        DecisionLog.Parse(document.Content, hasFrontMatter: false);
                     if (string.Equals(memoryFile, indexPath, StringComparison.Ordinal))
                     {
                         parsedIndex = document;

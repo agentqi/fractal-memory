@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Preserved curated decisions, custom summaries, heading aliases and thematic breaks in context and exports.
+- Diagnosed damaged decision metadata without breaking retrieval; decision writes remain strict.
+- Reused loaded node/handoff data on resume, marked template guidance explicitly and added human-readable workflow output.
+- Preserved legacy YAML configuration defaults and final newlines on generated documents.
+
 - Added hash-checked section updates, dated timeline entries and managed decisions with supersession across CLI and MCP.
 - Added full document/section/artifact reads with source hashes, source coordinates and native MCP resource links.
 - Added review scheduling, stale/incomplete memory attention lists and explicit archived-node discovery.

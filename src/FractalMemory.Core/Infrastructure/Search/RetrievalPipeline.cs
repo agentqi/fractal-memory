@@ -88,7 +88,7 @@ internal static partial class RetrievalPipeline
 
     public static IReadOnlyList<MarkdownSection> ParseSections(string markdown)
     {
-        return FractalMemory.Core.Infrastructure.Parsing.MemoryMarkdown.Sections(markdown)
+        return FractalMemory.Core.Infrastructure.Parsing.MemoryMarkdown.Sections(markdown, hasFrontMatter: false)
             .Select(section => new MarkdownSection(section.Title, section.StartLine, section.EndLine, section.Content.Split('\n'))).ToArray();
     }
 
@@ -186,10 +186,11 @@ internal static partial class RetrievalPipeline
             return;
         }
 
-        var managedDecisions = fileName == node.DecisionsFileName ? DecisionLog.Parse(content) : [];
+        var managedDecisions = fileName == node.DecisionsFileName ? DecisionLog.Read(content, hasFrontMatter: false) : [];
+        var activeHeadings = managedDecisions.Where(d => d.Status == "active").Select(d => $"Decision {d.Id}").ToHashSet(StringComparer.Ordinal);
         var knowledge = MemoryMarkdown.Knowledge(content);
         var candidateSections = managedDecisions.Count == 0 ? ParseSections(knowledge)
-            : managedDecisions.Where(d => d.Status == "active").Select(d => MemoryMarkdown.FindSection(knowledge, $"Decision {d.Id}"))
+            : MemoryMarkdown.HeadingSections(knowledge, hasFrontMatter: false).Where(s => activeHeadings.Contains(s.Title))
                 .Select(s => new MarkdownSection(s.Title, s.StartLine, s.EndLine, s.Content.Split('\n'))).ToArray();
         var sections = candidateSections.Where(item => item.Lines.Any(line => !string.IsNullOrWhiteSpace(line))).ToArray();
         var section = preferredHeading == "Current State"

@@ -126,6 +126,7 @@ public interface IClock
 
 public interface IHumanFormatter
 {
+    string FormatWorkflow(object value);
     string FormatInitialization(string repositoryRoot);
     string FormatNodeCreated(MemoryNode node);
     string FormatOpen(OpenNodeResult result);

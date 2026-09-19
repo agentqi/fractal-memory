@@ -21,6 +21,11 @@ public sealed class MemoryWorkflowService(
     {
         var (_, storage) = Repository(wd);
         var node = await nodes.GetNodeAsync(wd, path, ct);
+        return await ReadDocumentAsync(storage, node, file, section, ct);
+    }
+
+    private async Task<MemoryDocument> ReadDocumentAsync(string storage, MemoryNode node, string file, string? section, CancellationToken ct)
+    {
         file = ResolveFile(node, file);
         var fullPath = RepositoryPathGuard.ResolveContainedPath(storage, $"{node.RelativePath}/{file}");
         if (!files.FileExists(fullPath)) throw new InvalidOperationException($"Memory document '{node.RelativePath}/{file}' was not found.");
@@ -36,7 +41,7 @@ public sealed class MemoryWorkflowService(
         var contract = new[] { node.IndexFileName, node.StateFileName, node.TimelineFileName, node.DecisionsFileName };
         if (!contract.Contains(file, StringComparer.Ordinal) && !file.StartsWith("artifacts/", StringComparison.Ordinal))
             throw new ArgumentException("Only index, state, timeline, decisions and artifacts/ documents are accessible.");
-        if (!NodeService.IsContentExtension(file) && !Path.GetExtension(file).Equals(".txt", StringComparison.OrdinalIgnoreCase))
+        if (!ImportedSourceRules.IsSupported(file))
             throw new ArgumentException("Supported source formats are Markdown, HTML and plain text.");
         return file;
     }
@@ -152,73 +157,83 @@ public sealed class MemoryWorkflowService(
     public async Task<IReadOnlyList<AttentionItem>> AttentionAsync(string wd, string? scope, int staleDays, CancellationToken ct)
     {
         if (staleDays < 1 || staleDays > 36500) throw new ArgumentOutOfRangeException(nameof(staleDays), "Stale days must be between 1 and 36500.");
-        var list = await ListAsync(wd, scope, false, ct);
-        var result = new List<AttentionItem>();
-        foreach (var item in list)
-        {
-            var reasons = new List<string>();
-            var node = await nodes.GetNodeAsync(wd, item.Path, ct);
-            if (item.ReviewAfter is { } date && date <= clock.UtcNow) reasons.Add($"Review overdue since {date:O}.");
-            if (item.LastUpdated is null || item.LastUpdated < clock.UtcNow.AddDays(-staleDays)) reasons.Add("Memory has no recent update timestamp.");
-            var context = structured.BuildAnswerContext(node, [], 3, 10);
-            reasons.AddRange(context.MissingInformation.Select(m => $"Missing {m}."));
-            if (reasons.Count > 0) result.Add(new(item.Path, reasons));
-        }
-        return result;
+        var (root, _) = Repository(wd);
+        var all = await nodes.GetAllNodesAsync(root, ct, scope: scope is null ? null : nodes.NormalizeNodePath(scope));
+        return all.Where(n => n.Metadata.Status != NodeStatus.Archived)
+            .Select(n => new AttentionItem(n.RelativePath, AttentionFor(n, staleDays).Warnings))
+            .Where(item => item.Reasons.Count > 0).ToArray();
+    }
+
+    private (IReadOnlyList<string> Warnings, IReadOnlyList<string> Flags) AttentionFor(MemoryNode node, int staleDays)
+    {
+        var warnings = new List<string>();
+        var flags = new List<string>();
+        var missing = structured.BuildAnswerContext(node, [], 3, 10).MissingInformation;
+        if (missing.Count > 0) { warnings.AddRange(missing.Select(m => $"Missing {m}.")); flags.Add("incomplete context"); }
+        if (node.Metadata.ReviewAfter <= clock.UtcNow) { warnings.Add($"Review overdue since {node.Metadata.ReviewAfter:O}."); flags.Add("review overdue"); }
+        if (node.Metadata.LastUpdated is null || node.Metadata.LastUpdated < clock.UtcNow.AddDays(-staleDays))
+        { warnings.Add("This memory has no recent update timestamp."); flags.Add("stale"); }
+        if (node.Metadata.Status == NodeStatus.Archived) { warnings.Add("This memory is archived; verify that it still applies."); flags.Add("archived"); }
+        try { DecisionLog.Parse(node.DecisionsContent, hasFrontMatter: false); }
+        catch (InvalidOperationException) { warnings.Add("Managed decision metadata needs repair; read the decision source before relying on it."); flags.Add("decision metadata invalid"); }
+        return (warnings, flags);
     }
 
     public async Task<ContextPack> ContextAsync(string wd, string path, int maxCharacters, IReadOnlyList<string>? artifacts, CancellationToken ct)
     {
-        if (maxCharacters < 256 || maxCharacters > 1000000) throw new ArgumentOutOfRangeException(nameof(maxCharacters), "Character budget must be between 256 and 1000000.");
+        var (_, storage) = Repository(wd);
         var node = await nodes.GetNodeAsync(wd, path, ct);
+        return await BuildContextAsync(storage, node, maxCharacters, artifacts, ct);
+    }
+
+    private async Task<ContextPack> BuildContextAsync(string storage, MemoryNode node, int maxCharacters, IReadOnlyList<string>? artifacts, CancellationToken ct)
+    {
+        if (maxCharacters < 256 || maxCharacters > 1000000) throw new ArgumentOutOfRangeException(nameof(maxCharacters), "Character budget must be between 256 and 1000000.");
         var parts = new List<(string Label, MemoryDocument Document)>();
-        var state = await ReadAsync(wd, path, "state", null, ct);
+        var state = await ReadDocumentAsync(storage, node, "state", null, ct);
         var semanticState = state.File.EndsWith(".md", StringComparison.OrdinalIgnoreCase) ? state.Content : HtmlTextExtractor.ToText(state.Content);
-        foreach (var section in MemoryMarkdown.Sections(semanticState)
-            .Where(s => new[] { "Current Objective", "Current Goal", "Active Constraints", "Next Best Actions", "Open Questions" }.Contains(s.Title, StringComparer.OrdinalIgnoreCase))
-            .OrderBy(s => s.Title.Contains("Objective", StringComparison.OrdinalIgnoreCase) || s.Title.Contains("Goal", StringComparison.OrdinalIgnoreCase) ? 0 : s.Title.Contains("Constraints", StringComparison.OrdinalIgnoreCase) ? 1 : 2))
+        foreach (var section in MemoryMarkdown.Sections(semanticState, hasFrontMatter: state.File.EndsWith(".md", StringComparison.OrdinalIgnoreCase))
+            .Where(s => ContextPriority(s.Title) < 4))
         {
             var content = MemoryMarkdown.Knowledge(section.Content).Trim();
             if (content.Length > 0) parts.Add((section.Title, state with { Content = content, Section = section.Title, StartLine = state.StartLine is null ? null : section.StartLine, EndLine = state.EndLine is null ? null : section.EndLine }));
         }
-        var decisionDocument = await ReadAsync(wd, path, "decisions", null, ct);
-        var managed = DecisionLog.Parse(decisionDocument.Content);
+        var decisionDocument = await ReadDocumentAsync(storage, node, "decisions", null, ct);
+        var managed = DecisionLog.Read(decisionDocument.Content);
         if (managed.Count > 0)
         {
-            foreach (var decision in managed.Where(d => d.Status == "active"))
+            var active = managed.Where(d => d.Status == "active").ToDictionary(d => $"Decision {d.Id}", StringComparer.Ordinal);
+            foreach (var section in MemoryMarkdown.HeadingSections(decisionDocument.Content).Where(s => active.ContainsKey(s.Title)))
             {
-                var section = MemoryMarkdown.FindSection(decisionDocument.Content, $"Decision {decision.Id}");
-                parts.Add(($"Active decision {decision.Id}", decisionDocument with { Content = decision.Content, Section = section.Title, StartLine = section.StartLine, EndLine = section.EndLine }));
+                var decision = active[section.Title];
+                parts.Add(("Key Decisions In Force", decisionDocument with { Content = decision.Content, Section = section.Title,
+                    StartLine = decisionDocument.StartLine is null ? null : section.StartLine, EndLine = decisionDocument.EndLine is null ? null : section.EndLine }));
             }
         }
         else
         {
             var decisions = MemoryMarkdown.Knowledge(node.DecisionsContent).Trim();
             if (decisions.Split('\n').Any(l => !string.IsNullOrWhiteSpace(l) && !l.StartsWith('#')))
-                parts.Add(("Recorded decisions", decisionDocument with { Content = decisions }));
+                parts.Add(("Key Decisions In Force", decisionDocument with { Content = decisions }));
+        }
+        if (!parts.Any(p => StructuredMemoryService.SectionKey(p.Label) == "current_objective") && StructuredMemoryService.MeaningfulSummary(node) is { } summary)
+        {
+            var index = await ReadDocumentAsync(storage, node, "index", null, ct);
+            parts.Add(("Current Objective", index with { Content = summary }));
         }
         if (parts.Count == 0)
         {
             var cleanState = MemoryMarkdown.Knowledge(node.StateContent).Trim();
             parts.Add(("State (review before relying on it)", state with { Content = cleanState }));
         }
-        parts = parts.OrderBy(p => p.Label.Contains("Objective", StringComparison.OrdinalIgnoreCase) || p.Label.Contains("Goal", StringComparison.OrdinalIgnoreCase) ? 0
-            : p.Label.Contains("Constraints", StringComparison.OrdinalIgnoreCase) ? 1
-            : p.Label.Contains("decision", StringComparison.OrdinalIgnoreCase) ? 2 : 3).ToList();
         foreach (var artifact in artifacts ?? [])
         {
             if (!artifact.StartsWith("artifacts/", StringComparison.Ordinal)) throw new ArgumentException("Context attachments must be artifacts/ paths.");
-            parts.Add((artifact, await ReadAsync(wd, path, artifact, null, ct)));
+            parts.Add((artifact, await ReadDocumentAsync(storage, node, artifact, null, ct)));
         }
-        var warnings = structured.BuildAnswerContext(node, [], 3, 10).MissingInformation.Select(m => $"Missing {m}.").ToList();
-        if (node.Metadata.ReviewAfter <= clock.UtcNow) warnings.Add("The scheduled review is overdue.");
-        if (node.Metadata.LastUpdated is null || node.Metadata.LastUpdated < clock.UtcNow.AddDays(-30)) warnings.Add("This memory has no recent update timestamp.");
-        if (node.Metadata.Status == NodeStatus.Archived) warnings.Add("This memory is archived; verify that it still applies.");
+        parts = parts.OrderBy(p => ContextPriority(p.Label)).ToList();
+        var (warnings, flags) = AttentionFor(node, 30);
         var header = $"# {node.RelativePath}\nStatus: {node.Metadata.Status} | Updated: {node.Metadata.LastUpdated?.ToString("yyyy-MM-dd") ?? "unknown"}\n";
-        var flags = new List<string>();
-        if (warnings.Any(w => w.StartsWith("Missing ", StringComparison.Ordinal))) flags.Add("incomplete context");
-        if (node.Metadata.ReviewAfter <= clock.UtcNow) flags.Add("review overdue");
-        if (node.Metadata.LastUpdated is null || node.Metadata.LastUpdated < clock.UtcNow.AddDays(-30)) flags.Add("stale");
         if (flags.Count > 0) header += "Attention: " + string.Join(", ", flags) + "\n";
         const string marker = "\n[Context truncated; read linked sources.]";
         var output = new StringBuilder();
@@ -243,6 +258,15 @@ public sealed class MemoryWorkflowService(
         return new(node.RelativePath, text, maxCharacters, text.Length, truncated, omitted, sources, warnings);
     }
 
+    private static int ContextPriority(string heading) => StructuredMemoryService.SectionKey(heading) switch
+    {
+        "current_objective" => 0,
+        "active_constraints" => 1,
+        "key_decisions" => 2,
+        "project_branch" or "next_best_actions" or "open_questions" => 3,
+        _ => 4,
+    };
+
     private static string Clip(string value, int length)
     {
         var count = Math.Min(value.Length, Math.Max(0, length));
@@ -253,10 +277,14 @@ public sealed class MemoryWorkflowService(
     public async Task<IReadOnlyList<HandoffEntry>> HandoffsAsync(string wd, string path, CancellationToken ct)
     {
         var (root, storage) = Repository(wd);
-        path = nodes.NormalizeNodePath(path);
         var config = await repositories.LoadConfigAsync(root, ct);
+        return (await LoadHandoffsAsync(storage, config, nodes.NormalizeNodePath(path), ct)).Select(h => h.Entry).ToArray();
+    }
+
+    private async Task<IReadOnlyList<(HandoffEntry Entry, string Content)>> LoadHandoffsAsync(string storage, RepositoryConfig config, string path, CancellationToken ct)
+    {
         var directory = RepositoryPathGuard.ResolveContainedPath(storage, config.Handoffs.Directory);
-        var result = new List<(HandoffEntry Entry, DateTimeOffset Modified)>();
+        var result = new List<(HandoffEntry Entry, DateTimeOffset Modified, string Content)>();
         foreach (var fullPath in files.EnumerateFiles(directory, "*.md", SearchOption.TopDirectoryOnly))
         {
             RepositoryPathGuard.EnsureContainedPath(storage, fullPath);
@@ -267,31 +295,32 @@ public sealed class MemoryWorkflowService(
             if (!belongs) continue;
             var date = metadata.TryGetValue("created_at", out var created) && DateTimeOffset.TryParse(created?.ToString(), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var parsed)
                 ? parsed : files.GetLastWriteTimeUtc(fullPath);
-            result.Add((new(Path.GetFileName(fullPath), date, metadata.ContainsKey("source_hashes")), files.GetLastWriteTimeUtc(fullPath)));
+            result.Add((new(Path.GetFileName(fullPath), date, metadata.ContainsKey("source_hashes")), files.GetLastWriteTimeUtc(fullPath), raw));
         }
-        return result.OrderByDescending(h => h.Entry.CreatedAt).ThenByDescending(h => h.Modified).ThenByDescending(h => h.Entry.File, StringComparer.Ordinal).Select(h => h.Entry).ToArray();
+        return result.OrderByDescending(h => h.Entry.CreatedAt).ThenByDescending(h => h.Modified).ThenByDescending(h => h.Entry.File, StringComparer.Ordinal).Select(h => (h.Entry, h.Content)).ToArray();
     }
 
     public async Task<string> ReadHandoffAsync(string wd, string path, string? file, CancellationToken ct)
     {
-        var entries = await HandoffsAsync(wd, path, ct);
-        file ??= entries.FirstOrDefault()?.File;
-        if (file is null || !entries.Any(h => h.File == file)) throw new InvalidOperationException("No matching handoff for this node. Create one with 'fm handoff create'.");
         var (root, storage) = Repository(wd);
         var config = await repositories.LoadConfigAsync(root, ct);
-        return await files.ReadAllTextAsync(RepositoryPathGuard.ResolveContainedPath(storage, $"{config.Handoffs.Directory}/{file}"), ct);
+        var entries = await LoadHandoffsAsync(storage, config, nodes.NormalizeNodePath(path), ct);
+        var selected = file is null ? entries.FirstOrDefault() : entries.FirstOrDefault(h => h.Entry.File == file);
+        return selected.Content ?? throw new InvalidOperationException("No matching handoff for this node. Create one with 'fm handoff create'.");
     }
 
     public async Task<ResumePacket> ResumeAsync(string wd, string path, int maxCharacters, CancellationToken ct)
     {
+        var (root, storage) = Repository(wd);
+        var config = await repositories.LoadConfigAsync(root, ct);
         var node = await nodes.GetNodeAsync(wd, path, ct);
-        var context = await ContextAsync(wd, path, maxCharacters, null, ct);
-        var latest = (await HandoffsAsync(wd, path, ct)).FirstOrDefault();
+        var context = await BuildContextAsync(storage, node, maxCharacters, null, ct);
+        var latest = (await LoadHandoffsAsync(storage, config, node.RelativePath, ct)).FirstOrDefault();
         var changes = new List<string>();
         var available = false;
-        if (latest is not null)
+        if (latest.Entry is not null)
         {
-            var metadata = MemoryMarkdown.Metadata(await ReadHandoffAsync(wd, path, latest.File, ct));
+            var metadata = MemoryMarkdown.Metadata(latest.Content);
             if (metadata.TryGetValue("source_hashes", out var value) && value is Dictionary<object, object> hashes)
             {
                 available = true;
@@ -299,7 +328,8 @@ public sealed class MemoryWorkflowService(
                 changes.AddRange(previous.Keys.Union(node.SourceHashes.Keys).Where(key => previous.GetValueOrDefault(key) != node.SourceHashes.GetValueOrDefault(key)).Order(StringComparer.Ordinal));
             }
         }
-        return new(context, latest, changes, available, (await AttentionAsync(wd, node.RelativePath, 30, ct)).Where(a => a.Path == node.RelativePath).ToArray());
+        var attention = AttentionFor(node, 30).Warnings;
+        return new(context, latest.Entry, changes, available, attention.Count == 0 ? [] : [new(node.RelativePath, attention)]);
     }
 
     public async Task<DoctorReport> DoctorAsync(string wd, bool repair, CancellationToken ct)
@@ -326,8 +356,7 @@ public sealed class MemoryWorkflowService(
         path = nodes.NormalizeNodePath(path);
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceName);
         ArgumentException.ThrowIfNullOrWhiteSpace(content);
-        var extension = Path.GetExtension(sourceName).ToLowerInvariant();
-        if (extension is not (".md" or ".html" or ".htm" or ".txt")) throw new ArgumentException("Import supports .md, .html, .htm and .txt notes.");
+        var artifact = ImportedSourceRules.ArtifactPath(sourceName);
         var config = await repositories.LoadConfigAsync(root, ct);
         var importLock = RepositoryPathGuard.ResolveContainedPath(storage, "indexes/locks/import.lock");
         if (apply) files.CreateDirectory(Path.GetDirectoryName(importLock)!);
@@ -346,7 +375,6 @@ public sealed class MemoryWorkflowService(
         var warnings = new List<string>();
         if (apply && canApply)
         {
-            var artifact = "artifacts/source" + extension;
             var metadata = new Dictionary<string, object?>
             {
                 ["title"] = Path.GetFileNameWithoutExtension(sourceName),

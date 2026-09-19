@@ -159,7 +159,7 @@ public static class CommandFactory
         root.Subcommands.Add(recent);
         root.Subcommands.Add(index);
         root.Subcommands.Add(validate);
-        WorkflowCommands.Add(root, handoff, provider.GetRequiredService<IMemoryWorkflowService>(), json);
+        WorkflowCommands.Add(root, handoff, provider.GetRequiredService<IMemoryWorkflowService>(), json, formatter);
         return root;
 
         void Write<T>(ParseResult parseResult, T value, string text) => Console.WriteLine(parseResult.GetValue(json) ? System.Text.Json.JsonSerializer.Serialize(value, WorkflowCommands.JsonOptions) : text);
@@ -171,19 +171,9 @@ public static class CommandFactory
                 await action();
                 return CliExitCodes.Success;
             }
-            catch (ArgumentException exception)
+            catch (Exception exception) when (CliOutput.IsUserError(exception))
             {
-                await Console.Error.WriteLineAsync(parseResult.GetValue(json) ? System.Text.Json.JsonSerializer.Serialize(new { error = exception.Message }, WorkflowCommands.JsonOptions) : $"Error: {exception.Message}");
-                return CliExitCodes.UserError;
-            }
-            catch (InvalidOperationException exception)
-            {
-                await Console.Error.WriteLineAsync(parseResult.GetValue(json) ? System.Text.Json.JsonSerializer.Serialize(new { error = exception.Message }, WorkflowCommands.JsonOptions) : $"Error: {exception.Message}");
-                return CliExitCodes.UserError;
-            }
-            catch (IOException exception)
-            {
-                await Console.Error.WriteLineAsync(parseResult.GetValue(json) ? System.Text.Json.JsonSerializer.Serialize(new { error = exception.Message }, WorkflowCommands.JsonOptions) : $"Error: {exception.Message}");
+                CliOutput.WriteError(parseResult.GetValue(json), exception.Message);
                 return CliExitCodes.UserError;
             }
         }
@@ -194,19 +184,9 @@ public static class CommandFactory
             {
                 return await action();
             }
-            catch (ArgumentException exception)
+            catch (Exception exception) when (CliOutput.IsUserError(exception))
             {
-                await Console.Error.WriteLineAsync(parseResult.GetValue(json) ? System.Text.Json.JsonSerializer.Serialize(new { error = exception.Message }, WorkflowCommands.JsonOptions) : $"Error: {exception.Message}");
-                return CliExitCodes.UserError;
-            }
-            catch (InvalidOperationException exception)
-            {
-                await Console.Error.WriteLineAsync(parseResult.GetValue(json) ? System.Text.Json.JsonSerializer.Serialize(new { error = exception.Message }, WorkflowCommands.JsonOptions) : $"Error: {exception.Message}");
-                return CliExitCodes.UserError;
-            }
-            catch (IOException exception)
-            {
-                await Console.Error.WriteLineAsync(parseResult.GetValue(json) ? System.Text.Json.JsonSerializer.Serialize(new { error = exception.Message }, WorkflowCommands.JsonOptions) : $"Error: {exception.Message}");
+                CliOutput.WriteError(parseResult.GetValue(json), exception.Message);
                 return CliExitCodes.UserError;
             }
         }

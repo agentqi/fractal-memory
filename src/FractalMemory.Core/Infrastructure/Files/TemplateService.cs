@@ -47,19 +47,19 @@ public sealed class TemplateService(IFileSystemService fileSystemService, IClock
 
                 ## Current Objective
 
-                Capture the current operating reality, active priorities, and known constraints here.
+                <!-- fractalmem-placeholder: Capture the current operating reality, active priorities, and known constraints here. -->
 
                 ## Active Constraints
 
-                - Add the active constraints that apply right now.
+                <!-- fractalmem-placeholder: Add the active constraints that apply right now. -->
 
                 ## Next Best Actions
 
-                - Add the next best actions to move the repository forward.
+                <!-- fractalmem-placeholder: Add the next best actions to move the repository forward. -->
 
                 ## Open Questions
 
-                - Add unresolved questions that block progress.
+                <!-- fractalmem-placeholder: Add unresolved questions that block progress. -->
                 """,
             ["root/timeline.md"] = """
                 ---
@@ -72,7 +72,7 @@ public sealed class TemplateService(IFileSystemService fileSystemService, IClock
 
                 # Timeline
 
-                - Add dated updates here.
+                <!-- fractalmem-placeholder: Add dated updates here. -->
                 """,
             ["root/decisions.md"] = """
                 ---
@@ -85,7 +85,7 @@ public sealed class TemplateService(IFileSystemService fileSystemService, IClock
 
                 # Decisions
 
-                - Record key decisions and why they were made.
+                <!-- fractalmem-placeholder: Record key decisions and why they were made. -->
                 """,
             ["templates/node/index.md"] = """
                 ---
@@ -100,7 +100,7 @@ public sealed class TemplateService(IFileSystemService fileSystemService, IClock
 
                 ## Summary
 
-                Describe what this node is for.
+                <!-- fractalmem-placeholder: Describe what this node is for. -->
 
                 ## Navigation
 
@@ -125,19 +125,19 @@ public sealed class TemplateService(IFileSystemService fileSystemService, IClock
 
                 ## Current Objective
 
-                Capture what is currently true, active, and important.
+                <!-- fractalmem-placeholder: Capture what is currently true, active, and important. -->
 
                 ## Active Constraints
 
-                - Add constraints, guardrails, or decisions in force.
+                <!-- fractalmem-placeholder: Add constraints, guardrails, or decisions in force. -->
 
                 ## Next Best Actions
 
-                - Add the next best actions.
+                <!-- fractalmem-placeholder: Add the next best actions. -->
 
                 ## Open Questions
 
-                - Add unresolved questions.
+                <!-- fractalmem-placeholder: Add unresolved questions. -->
                 """,
             ["templates/node/timeline.md"] = """
                 ---
@@ -150,7 +150,7 @@ public sealed class TemplateService(IFileSystemService fileSystemService, IClock
 
                 # Timeline
 
-                - Add dated entries here.
+                <!-- fractalmem-placeholder: Add dated entries here. -->
                 """,
             ["templates/node/decisions.md"] = """
                 ---
@@ -163,7 +163,7 @@ public sealed class TemplateService(IFileSystemService fileSystemService, IClock
 
                 # Decisions
 
-                - Record decisions and rationale here.
+                <!-- fractalmem-placeholder: Record decisions and rationale here. -->
                 """,
         };
 
@@ -196,7 +196,7 @@ public sealed class TemplateService(IFileSystemService fileSystemService, IClock
                       <h1>{{title}}</h1>
                       <section>
                         <h2>Summary</h2>
-                        <p>Describe the role of this node and when it should be loaded.</p>
+                        <p><!-- fractalmem-placeholder: Describe the role of this node and when it should be loaded. --></p>
                       </section>
                       <section>
                         <h2>Suggested Reads</h2>
@@ -225,19 +225,19 @@ public sealed class TemplateService(IFileSystemService fileSystemService, IClock
                       </section>
                       <section>
                         <h2>Current Objective</h2>
-                        <p>Capture what is true right now.</p>
+                        <p><!-- fractalmem-placeholder: Capture what is true right now. --></p>
                       </section>
                       <section>
                         <h2>Active Constraints</h2>
-                        <ul><li>Add constraints, guardrails, or decisions in force.</li></ul>
+                        <ul><li><!-- fractalmem-placeholder: Add constraints, guardrails, or decisions in force. --></li></ul>
                       </section>
                       <section>
                         <h2>Next Best Actions</h2>
-                        <ul><li>Add the next best actions.</li></ul>
+                        <ul><li><!-- fractalmem-placeholder: Add the next best actions. --></li></ul>
                       </section>
                       <section>
                         <h2>Open Questions</h2>
-                        <ul><li>Add unresolved questions.</li></ul>
+                        <ul><li><!-- fractalmem-placeholder: Add unresolved questions. --></li></ul>
                       </section>
                     </body>
                     </html>
@@ -252,7 +252,7 @@ public sealed class TemplateService(IFileSystemService fileSystemService, IClock
                     </head>
                     <body>
                       <h1>Timeline</h1>
-                      <ul><li>Add dated updates here.</li></ul>
+                      <ul><li><!-- fractalmem-placeholder: Add dated updates here. --></li></ul>
                     </body>
                     </html>
                     """,
@@ -266,7 +266,7 @@ public sealed class TemplateService(IFileSystemService fileSystemService, IClock
                     </head>
                     <body>
                       <h1>Decisions</h1>
-                      <ul><li>Record decisions and rationale here.</li></ul>
+                      <ul><li><!-- fractalmem-placeholder: Record decisions and rationale here. --></li></ul>
                     </body>
                     </html>
                     """,
@@ -288,7 +288,7 @@ public sealed class TemplateService(IFileSystemService fileSystemService, IClock
 
                 ## Summary
 
-                Describe the role of this node and when it should be loaded.
+                <!-- fractalmem-placeholder: Describe the role of this node and when it should be loaded. -->
 
                 ## Suggested Reads
 
@@ -313,19 +313,19 @@ public sealed class TemplateService(IFileSystemService fileSystemService, IClock
 
                 ## Current Objective
 
-                Capture what is true right now.
+                <!-- fractalmem-placeholder: Capture what is true right now. -->
 
                 ## Active Constraints
 
-                - Add constraints, guardrails, or decisions in force.
+                <!-- fractalmem-placeholder: Add constraints, guardrails, or decisions in force. -->
 
                 ## Next Best Actions
 
-                - Add the next best actions.
+                <!-- fractalmem-placeholder: Add the next best actions. -->
 
                 ## Open Questions
 
-                - Add unresolved questions.
+                <!-- fractalmem-placeholder: Add unresolved questions. -->
                 """,
             ["timeline.md"] = $$"""
                 ---
@@ -338,7 +338,7 @@ public sealed class TemplateService(IFileSystemService fileSystemService, IClock
 
                 # Timeline
 
-                - Add dated updates here.
+                <!-- fractalmem-placeholder: Add dated updates here. -->
                 """,
             ["decisions.md"] = $$"""
                 ---
@@ -351,7 +351,7 @@ public sealed class TemplateService(IFileSystemService fileSystemService, IClock
 
                 # Decisions
 
-                - Record decisions and rationale here.
+                <!-- fractalmem-placeholder: Record decisions and rationale here. -->
                 """,
         };
     }

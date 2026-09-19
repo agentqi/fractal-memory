@@ -45,6 +45,22 @@ public sealed class WorkflowCommandTests
             Assert.InRange(resume.GetProperty("context").GetProperty("usedCharacters").GetInt32(), 1, 600);
             Assert.Single((await Run("list", "--scope", "projects")).EnumerateArray());
             Assert.True((await Run("doctor", "--repair")).GetProperty("indexesRebuilt").GetBoolean());
+            var sourceFile = Path.Combine(root, "note.txt");
+            await File.WriteAllTextAsync(sourceFile, "A source note.", TestContext.Current.CancellationToken);
+            foreach (var (arguments, expected) in new (string[], string)[]
+            {
+                (["doctor"], "Use 'fm doctor --repair'"),
+                (["import", sourceFile, "projects/import"], "Ready to import:"),
+                (["decisions", "projects/cli"], "No managed decisions found."),
+                (["attention", "--scope", "projects/cli"], "Missing Key Prior Decision."),
+                (["handoff", "list", "projects/cli"], "source snapshot available"),
+            })
+            {
+                output.GetStringBuilder().Clear();
+                Assert.Equal(0, await CliRunner.RunAsync(arguments, provider));
+                Assert.Contains(expected, output.ToString(), StringComparison.Ordinal);
+                Assert.DoesNotContain("\"nodePath\"", output.ToString(), StringComparison.Ordinal);
+            }
             error.GetStringBuilder().Clear();
             Assert.Equal(2, await CliRunner.RunAsync(["context", "projects/cli", "--max-characters", "invalid", "--json"], provider));
             Assert.NotEmpty(JsonDocument.Parse(error.ToString()).RootElement.GetProperty("error").GetString()!);

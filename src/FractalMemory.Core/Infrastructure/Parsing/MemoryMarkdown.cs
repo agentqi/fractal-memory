@@ -6,19 +6,26 @@ using YamlDotNet.Serialization;
 namespace FractalMemory.Core.Infrastructure.Parsing;
 
 /// <summary>Source-aware ATX headings. Front matter, comments and fenced code are not headings.</summary>
-public static class MemoryMarkdown
+public static partial class MemoryMarkdown
 {
+    [GeneratedRegex(@"^ {0,3}(`{3,}|~{3,})(.*)$")]
+    private static partial Regex FenceRegex();
+    [GeneratedRegex(@"^ {0,3}(#{1,6})[ \t]+(.+?)\s*$")]
+    private static partial Regex HeadingRegex();
+    private static readonly IDeserializer YamlReader = new DeserializerBuilder().Build();
+    private static readonly ISerializer YamlWriter = new SerializerBuilder().Build();
+    private static readonly Regex FrontMatter = new(@"\A---[ \t]*\n(.*?\n)?---[ \t]*(?:\n|$)", RegexOptions.Singleline | RegexOptions.Compiled);
     public sealed record Heading(string Title, int Level, int Line);
     public sealed record Section(string Title, int StartLine, int EndLine, string Content);
     public static string Normalize(string text) => text.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
     public static string Hash(string text) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
-    public static IReadOnlyList<Heading> Headings(string text)
+    public static IReadOnlyList<Heading> Headings(string text, bool hasFrontMatter = true)
     {
         var lines = Normalize(text).Split('\n');
         var headings = new List<Heading>();
         char fence = '\0';
         var fenceLength = 0;
-        var frontMatter = lines[0].TrimEnd() == "---";
+        var frontMatter = hasFrontMatter && FrontMatter.IsMatch(Normalize(text));
         var comment = false;
         for (var i = 0; i < lines.Length; i++)
         {
@@ -28,7 +35,7 @@ public static class MemoryMarkdown
                 if (i > 0 && line.TrimEnd() == "---") frontMatter = false;
                 continue;
             }
-            var matchFence = Regex.Match(line, @"^ {0,3}(`{3,}|~{3,})(.*)$");
+            var matchFence = FenceRegex().Match(line);
             if (fence != '\0')
             {
                 if (matchFence.Success && matchFence.Groups[1].Value[0] == fence &&
@@ -51,16 +58,16 @@ public static class MemoryMarkdown
                 comment = !line.Contains("-->", StringComparison.Ordinal);
                 continue;
             }
-            var match = Regex.Match(line, @"^ {0,3}(#{1,6})[ \t]+(.+?)\s*$");
+            var match = HeadingRegex().Match(line);
             if (match.Success) headings.Add(new(Regex.Replace(match.Groups[2].Value, @"[ \t]+#+[ \t]*$", "").Trim(), match.Groups[1].Length, i + 1));
         }
         return headings;
     }
 
-    public static IReadOnlyList<Section> Sections(string text)
+    public static IReadOnlyList<Section> Sections(string text, bool hasFrontMatter = true)
     {
         var lines = Normalize(text).Split('\n');
-        var headings = Headings(text);
+        var headings = Headings(text, hasFrontMatter);
         var sections = new List<Section>();
         var start = 1;
         var title = "Document";
@@ -74,10 +81,21 @@ public static class MemoryMarkdown
         return sections;
     }
 
-    public static Section FindSection(string text, string title)
+    public static IReadOnlyList<Section> HeadingSections(string text, int maxLevel = 2, bool hasFrontMatter = true)
     {
         var lines = Normalize(text).Split('\n');
-        var headings = Headings(text);
+        var headings = Headings(text, hasFrontMatter).Where(h => h.Level <= maxLevel).ToArray();
+        return headings.Select((heading, i) =>
+        {
+            var end = i + 1 < headings.Length ? headings[i + 1].Line - 1 : lines.Length;
+            return new Section(heading.Title, heading.Line + 1, end, string.Join('\n', lines[heading.Line..end]));
+        }).ToArray();
+    }
+
+    public static Section FindSection(string text, string title, bool hasFrontMatter = true)
+    {
+        var lines = Normalize(text).Split('\n');
+        var headings = Headings(text, hasFrontMatter);
         var matches = headings.Where(h => h.Title.Equals(title, StringComparison.OrdinalIgnoreCase)).ToArray();
         if (matches.Length != 1) throw new InvalidOperationException(matches.Length == 0
             ? $"Section '{title}' was not found. Read the document to choose an existing heading."
@@ -93,16 +111,16 @@ public static class MemoryMarkdown
         var lines = Normalize(text).Split('\n');
         var replacement = Normalize(content).Trim();
         var level = Headings(text).Single(h => h.Line == section.StartLine - 1).Level;
-        if (Headings(replacement).Any(h => h.Level <= level))
+        if (Headings(replacement, hasFrontMatter: false).Any(h => h.Level <= level))
             throw new ArgumentException("Section content cannot introduce a heading at or above the selected section's level.");
         return string.Join('\n', lines[..(section.StartLine - 1)]) + "\n\n" + replacement + "\n\n" + string.Join('\n', lines[section.EndLine..]);
     }
 
     public static Dictionary<string, object?> Metadata(string text)
     {
-        var match = Regex.Match(Normalize(text), @"\A---[ \t]*\n(.*?\n)?---[ \t]*(?:\n|$)", RegexOptions.Singleline);
+        var match = FrontMatter.Match(Normalize(text));
         if (!match.Success) return [];
-        try { return new DeserializerBuilder().Build().Deserialize<Dictionary<string, object?>>(match.Groups[1].Value) ?? []; }
+        try { return YamlReader.Deserialize<Dictionary<string, object?>>(match.Groups[1].Value) ?? []; }
         catch (YamlDotNet.Core.YamlException exception) { throw new InvalidOperationException("Malformed front matter.", exception); }
     }
 
@@ -111,9 +129,9 @@ public static class MemoryMarkdown
         var metadata = Metadata(text);
         foreach (var change in changes) metadata[change.Key] = change.Value;
         var normalized = Normalize(text);
-        var match = Regex.Match(normalized, @"\A---[ \t]*\n(.*?\n)?---[ \t]*(?:\n|$)", RegexOptions.Singleline);
+        var match = FrontMatter.Match(normalized);
         var body = match.Success ? normalized[match.Length..] : normalized;
-        return "---\n" + new SerializerBuilder().Build().Serialize(metadata).TrimEnd() + "\n---\n" + body;
+        return "---\n" + YamlWriter.Serialize(metadata).TrimEnd() + "\n---\n" + body;
     }
 
     // Exact legacy scaffold text is guidance, never evidence of a real objective or decision.

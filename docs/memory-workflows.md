@@ -96,3 +96,11 @@ fm import ./existing-notes.md research/existing-notes --apply --json
 The initial importer accepts one Markdown, HTML or text note and an explicit destination node path. Preview is the default. It reports destination conflicts and duplicate source hashes; either blocks an apply. Apply stages a complete draft node, preserves the original text under `artifacts/source.*`, and records the source name, source timestamp and import hash. The source is not summarized into assertions automatically: read it, then record the current objective and constraints through the update workflow.
 
 MCP `memory_import` takes supplied `content` and `sourceName`, with optional `sourceModified`; it never reads arbitrary host files. `apply` defaults to false. Directory/bulk import and automatic hierarchy suggestions are future extensions.
+
+### Template guidance and manual edits
+
+Wrap custom scaffold instructions in `<!-- fractalmem-placeholder: your guidance -->`. Replace the entire comment when recording a fact. Marked guidance is excluded from context and answer fields, regardless of its wording; older bundled placeholder sentences are still recognized.
+
+Curated state decisions are combined with active managed decisions. User-written index summaries provide an objective when the state has none; generated summaries do not. Context accepts the same heading aliases as structured retrieval.
+
+If managed decision metadata is damaged by a manual edit, retrieval remains available and `doctor` reports the source error. Repair that metadata before updating the decision log; index repair does not rewrite source documents.
