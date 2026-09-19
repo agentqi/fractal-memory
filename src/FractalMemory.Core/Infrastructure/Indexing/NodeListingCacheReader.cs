@@ -1,7 +1,6 @@
 using System.Text.Json;
 using FractalMemory.Core.Application.Services;
 using FractalMemory.Core.Domain.Models;
-using FractalMemory.Core.Domain.Rules;
 using FractalMemory.Core.Infrastructure.Files;
 
 namespace FractalMemory.Core.Infrastructure.Indexing;
@@ -48,15 +47,16 @@ public sealed class NodeListingCacheReader(
         foreach (var (relativePath, entry) in manifest.Nodes)
         {
             string normalizedPath;
+            string fullPath;
             try
             {
-                normalizedPath = NodePathRules.Normalize(relativePath);
+                normalizedPath = RepositoryPathGuard.NormalizeRelativeDirectory(relativePath);
                 if (!string.Equals(normalizedPath, relativePath, StringComparison.Ordinal))
                 {
                     return null;
                 }
 
-                RepositoryPathGuard.ResolveContainedPath(storageRoot, normalizedPath);
+                fullPath = RepositoryPathGuard.ResolveContainedPath(storageRoot, normalizedPath);
             }
             catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
             {
@@ -69,11 +69,6 @@ public sealed class NodeListingCacheReader(
             }
 
             var cacheFilePath = RepositoryPathGuard.ResolveContainedPath(nodeCacheRoot, entry.CacheFile);
-            if (!IsContainedIn(nodeCacheRoot, cacheFilePath))
-            {
-                return null;
-            }
-
             if (!fileSystemService.FileExists(cacheFilePath))
             {
                 return null;
@@ -104,7 +99,6 @@ public sealed class NodeListingCacheReader(
                 return null;
             }
 
-            var fullPath = RepositoryPathGuard.ResolveContainedPath(storageRoot, normalizedPath);
             nodes.Add(new MemoryNode
             {
                 RelativePath = normalizedPath,
@@ -166,11 +160,4 @@ public sealed class NodeListingCacheReader(
         return fileName.EndsWith(".json", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static bool IsContainedIn(string root, string candidate)
-    {
-        var normalizedRoot = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        var normalizedCandidate = Path.GetFullPath(candidate);
-        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-        return normalizedCandidate.StartsWith(normalizedRoot + Path.DirectorySeparatorChar, comparison);
-    }
 }

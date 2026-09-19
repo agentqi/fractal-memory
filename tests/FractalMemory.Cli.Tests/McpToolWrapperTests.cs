@@ -42,7 +42,6 @@ public sealed class McpToolWrapperTests
             new StubHandoffService(),
             new StubIndexService(),
             new StubValidationService(),
-            new StubRepositoryService(),
             context);
 
         var response = await tools.MemorySearch("alpha", limit: 1, scope: "projects/", cancellationToken: TestContext.Current.CancellationToken);
@@ -79,13 +78,13 @@ public sealed class McpToolWrapperTests
 
     private sealed class StubReadService : IReadService
     {
-        public Task<OpenNodeResult> OpenAsync(string workingDirectory, string nodePath, RetrievalDepth depth, NodeViewType view, CancellationToken cancellationToken) =>
+        public Task<OpenNodeResult> OpenAsync(string workingDirectory, string nodePath, RetrievalDepth? depth, NodeViewType view, CancellationToken cancellationToken) =>
             throw new NotSupportedException();
     }
 
     private sealed class StubExportService : IExportService
     {
-        public Task<ExportDocument> ExportAsync(string workingDirectory, string nodePath, ExportMode mode, CancellationToken cancellationToken) =>
+        public Task<ExportDocument> ExportAsync(string workingDirectory, string nodePath, ExportMode? mode, CancellationToken cancellationToken) =>
             throw new NotSupportedException();
     }
 

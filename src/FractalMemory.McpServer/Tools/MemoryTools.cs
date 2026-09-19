@@ -15,7 +15,6 @@ public sealed class MemoryTools(
     IHandoffService handoffService,
     IIndexService indexService,
     IValidationService validationService,
-    IRepositoryService repositoryService,
     IMcpRepositoryContext repositoryContext)
 {
     [McpServerTool(Name = "memory_open", Title = "Open Memory Node", ReadOnly = true, Idempotent = true)]
@@ -26,11 +25,10 @@ public sealed class MemoryTools(
         [Description("Preferred node view.")] NodeViewType view = NodeViewType.Index,
         CancellationToken cancellationToken = default)
     {
-        var config = await LoadConfig(cancellationToken);
         return await readService.OpenAsync(
             repositoryContext.GetServiceWorkingDirectory(),
             path,
-            depth ?? config.DefaultDepth,
+            depth,
             view,
             cancellationToken);
     }
@@ -66,11 +64,10 @@ public sealed class MemoryTools(
         [Description("Optional export mode. Uses config.yaml default_export_mode when omitted.")] ExportMode? mode = null,
         CancellationToken cancellationToken = default)
     {
-        var config = await LoadConfig(cancellationToken);
         return await exportService.ExportAsync(
             repositoryContext.GetServiceWorkingDirectory(),
             path,
-            mode ?? config.DefaultExportMode,
+            mode,
             cancellationToken);
     }
 
@@ -94,6 +91,4 @@ public sealed class MemoryTools(
     public Task<FractalMemory.Core.Domain.Models.ValidationReport> MemoryValidate(CancellationToken cancellationToken = default) =>
         validationService.ValidateAsync(repositoryContext.GetServiceWorkingDirectory(), cancellationToken);
 
-    private Task<FractalMemory.Core.Domain.Models.RepositoryConfig> LoadConfig(CancellationToken cancellationToken) =>
-        repositoryService.LoadConfigAsync(repositoryContext.GetRepositoryRoot(), cancellationToken);
 }

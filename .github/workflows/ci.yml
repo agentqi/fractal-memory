@@ -28,26 +28,16 @@ jobs:
           dotnet-version: 10.0.x
       - run: dotnet restore FractalMemory.sln
       - run: dotnet build FractalMemory.sln --configuration Release --no-restore -warnaserror
-      - run: dotnet test --solution FractalMemory.sln --configuration Release --no-build
-
-  coverage:
-    name: Coverage
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: actions/setup-dotnet@v6.0.0
-        with:
-          dotnet-version: 10.0.x
-      - run: dotnet restore FractalMemory.sln
-      - run: dotnet build FractalMemory.sln --configuration Release --no-restore -warnaserror
-      - run: >-
-          dotnet test --solution FractalMemory.sln
-          --configuration Release
-          --no-build
-          --coverage
-          --coverage-output-format cobertura
-          --results-directory TestResults
+      - name: Test
+        if: matrix.os != 'ubuntu-latest'
+        run: dotnet test --solution FractalMemory.sln --configuration Release --no-build
+      - name: Test with coverage
+        if: matrix.os == 'ubuntu-latest'
+        run: >-
+          dotnet test --solution FractalMemory.sln --configuration Release --no-build
+          --coverage --coverage-output-format cobertura --results-directory TestResults
       - uses: actions/upload-artifact@v7.0.1
+        if: matrix.os == 'ubuntu-latest'
         with:
           name: coverage
           path: TestResults/*.cobertura.xml

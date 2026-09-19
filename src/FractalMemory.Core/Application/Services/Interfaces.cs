@@ -30,7 +30,7 @@ public interface IReadService
     Task<OpenNodeResult> OpenAsync(
         string workingDirectory,
         string nodePath,
-        RetrievalDepth depth,
+        RetrievalDepth? depth,
         NodeViewType view,
         CancellationToken cancellationToken);
 }
@@ -51,7 +51,7 @@ public interface IExportService
     Task<ExportDocument> ExportAsync(
         string workingDirectory,
         string nodePath,
-        ExportMode mode,
+        ExportMode? mode,
         CancellationToken cancellationToken);
 }
 

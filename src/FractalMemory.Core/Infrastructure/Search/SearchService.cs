@@ -47,7 +47,7 @@ public sealed class SearchService(
 
         var results = perNodeBests.Where(item => item is not null).Cast<SearchResult>().ToList();
 
-        var effectiveLimit = limit is > 0 ? limit.Value : config.Retrieval.DiagnosticTopK;
+        var effectiveLimit = limit ?? config.Retrieval.DiagnosticTopK;
         return results
             .OrderByDescending(result => result.Score)
             .ThenByDescending(result => FileTypePriority(result.MatchedFile))
@@ -320,7 +320,7 @@ public sealed class SearchService(
         foreach (var path in fileSystemService.EnumerateFiles(storageRoot, "*", SearchOption.AllDirectories))
         {
             RepositoryPathGuard.EnsureContainedPath(storageRoot, path);
-            if (!IsSearchableArtifact(path) || IsExcludedMemoryPath(storageRoot, path, handoffDirectory))
+            if (!IsSearchableArtifact(path) || NodeService.IsExcludedNodeContent(storageRoot, path, handoffDirectory))
             {
                 continue;
             }
@@ -330,17 +330,6 @@ public sealed class SearchService(
                 yield return path;
             }
         }
-    }
-
-    private static bool IsExcludedMemoryPath(string storageRoot, string path, string handoffDirectory)
-    {
-        var relative = Path.GetRelativePath(storageRoot, path).Replace(Path.DirectorySeparatorChar, '/');
-        return relative.StartsWith("templates/", StringComparison.Ordinal) ||
-            relative.StartsWith("archive/", StringComparison.Ordinal) ||
-            relative.StartsWith("handoffs/", StringComparison.Ordinal) ||
-            relative.StartsWith(handoffDirectory + "/", StringComparison.Ordinal) ||
-            relative.StartsWith("indexes/", StringComparison.Ordinal) ||
-            relative.Contains("/artifacts/", StringComparison.Ordinal);
     }
 
     private static async Task<string> ReadArtifactContentAsync(

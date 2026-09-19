@@ -17,7 +17,7 @@ public sealed class RepositoryConfig
 public sealed class IndexingOptions
 {
     public bool Enabled { get; init; } = true;
-    public bool RefreshOnWrite { get; init; }
+    public bool RefreshOnWrite { get; init; } = true;
 }
 
 public sealed class RetrievalOptions

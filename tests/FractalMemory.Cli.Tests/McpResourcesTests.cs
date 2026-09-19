@@ -159,7 +159,6 @@ public sealed class McpResourcesTests
                 provider.GetRequiredService<IHandoffService>(),
                 provider.GetRequiredService<IIndexService>(),
                 provider.GetRequiredService<IValidationService>(),
-                repositoryService,
                 context);
 
             var opened = await tools.MemoryOpen("projects/defaults", cancellationToken: TestContext.Current.CancellationToken);
