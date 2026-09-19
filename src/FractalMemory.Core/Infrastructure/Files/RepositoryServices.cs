@@ -27,8 +27,14 @@ public sealed class RepositoryService(
             throw new InvalidOperationException($"Repository already exists at '{existing}'.");
         }
 
-        var repositoryRoot = Path.Combine(workingDirectory, ".fractal-memory");
-        fileSystemService.CreateDirectory(repositoryRoot);
+        var repositoryRoot = RepositoryPathGuard.ResolveContainedPath(workingDirectory, ".fractal-memory");
+        if (fileSystemService.DirectoryExists(repositoryRoot) || fileSystemService.FileExists(repositoryRoot))
+        {
+            throw new InvalidOperationException(
+                $"Cannot initialize because FractalMem storage already exists at '{repositoryRoot}' without a valid config.yaml.");
+        }
+
+        RepositoryPathGuard.CreateContainedDirectory(workingDirectory, ".fractal-memory", fileSystemService);
 
         foreach (var relativeDirectory in new[]
         {
@@ -51,12 +57,11 @@ public sealed class RepositoryService(
 
         var config = """
             version: 0.1
-            root_dir: .fractal-memory
             default_depth: 1
             default_export_mode: compact
             indexing:
               enabled: true
-              refresh_on_write: false
+              refresh_on_write: true
             retrieval:
               diagnostic_top_k: 10
               answer_top_k: 3
@@ -109,35 +114,60 @@ public sealed class RepositoryService(
 
     public async Task<RepositoryConfig> LoadConfigAsync(string repositoryRoot, CancellationToken cancellationToken)
     {
-        var configPath = Path.Combine(GetStorageRoot(repositoryRoot), "config.yaml");
+        var storageRoot = GetStorageRoot(repositoryRoot);
+        var configPath = RepositoryPathGuard.ResolveContainedPath(storageRoot, "config.yaml");
         var yaml = await fileSystemService.ReadAllTextAsync(configPath, cancellationToken);
         var data = ConfigDeserializer.Deserialize<Dictionary<object, object?>>(yaml) ?? [];
+
+        var defaultDepthValue = GetInt(data, "default_depth") ?? (int)RetrievalDepth.Orientation;
+        if (!Enum.IsDefined(typeof(RetrievalDepth), defaultDepthValue))
+        {
+            throw new InvalidOperationException("Configuration value 'default_depth' must be between 0 and 3.");
+        }
+
+        var defaultExportModeValue = GetString(data, "default_export_mode") ?? ExportMode.Compact.ToString();
+        if (!Enum.TryParse<ExportMode>(defaultExportModeValue, true, out var defaultExportMode) || !Enum.IsDefined(defaultExportMode))
+        {
+            throw new InvalidOperationException("Configuration value 'default_export_mode' must be compact, standard, or verbose.");
+        }
+
+        var retrieval = GetSection(data, "retrieval");
+        var diagnosticTopK = retrieval is null ? 10 : GetInt(retrieval, "diagnostic_top_k") ?? 10;
+        var answerTopK = retrieval is null ? 3 : GetInt(retrieval, "answer_top_k") ?? 3;
+        var maxSnippetLines = retrieval is null ? 4 : GetInt(retrieval, "max_snippet_lines") ?? 4;
+        if (diagnosticTopK <= 0 || answerTopK <= 0 || maxSnippetLines <= 0)
+        {
+            throw new InvalidOperationException("Retrieval limits in config.yaml must be positive integers.");
+        }
+
+        var handoffs = GetSection(data, "handoffs");
+        var handoffDirectory = RepositoryPathGuard.NormalizeRelativeDirectory(
+            handoffs is null ? "handoffs" : GetString(handoffs, "directory") ?? "handoffs");
 
         return new RepositoryConfig
         {
             Version = GetString(data, "version") ?? "0.1",
-            RootDir = GetString(data, "root_dir") ?? ".fractal-memory",
-            DefaultDepth = (RetrievalDepth)(GetInt(data, "default_depth") ?? 1),
-            DefaultExportMode = Enum.TryParse<ExportMode>(GetString(data, "default_export_mode"), true, out var mode) ? mode : ExportMode.Compact,
+            DefaultDepth = (RetrievalDepth)defaultDepthValue,
+            DefaultExportMode = defaultExportMode,
             Indexing = GetSection(data, "indexing") is { } indexing ? new IndexingOptions
             {
                 Enabled = GetBool(indexing, "enabled") ?? true,
-                RefreshOnWrite = GetBool(indexing, "refresh_on_write") ?? false,
+                RefreshOnWrite = GetBool(indexing, "refresh_on_write") ?? true,
             } : new IndexingOptions(),
-            Retrieval = GetSection(data, "retrieval") is { } retrieval ? new RetrievalOptions
+            Retrieval = new RetrievalOptions
             {
-                DiagnosticTopK = GetInt(retrieval, "diagnostic_top_k") ?? 10,
-                AnswerTopK = GetInt(retrieval, "answer_top_k") ?? 3,
-                MaxSnippetLines = GetInt(retrieval, "max_snippet_lines") ?? 4,
-            } : new RetrievalOptions(),
+                DiagnosticTopK = diagnosticTopK,
+                AnswerTopK = answerTopK,
+                MaxSnippetLines = maxSnippetLines,
+            },
             Metadata = GetSection(data, "metadata") is { } metadata ? new MetadataOptions
             {
                 FrontMatter = GetBool(metadata, "front_matter") ?? true,
             } : new MetadataOptions(),
-            Handoffs = GetSection(data, "handoffs") is { } handoffs ? new HandoffOptions
+            Handoffs = new HandoffOptions
             {
-                Directory = GetString(handoffs, "directory") ?? "handoffs",
-            } : new HandoffOptions(),
+                Directory = handoffDirectory,
+            },
             Validation = GetSection(data, "validation") is { } validation ? new ValidationOptions
             {
                 RequireIndex = GetBool(validation, "require_index") ?? true,
@@ -146,7 +176,8 @@ public sealed class RepositoryService(
         };
     }
 
-    public string GetStorageRoot(string repositoryRoot) => Path.Combine(repositoryRoot, ".fractal-memory");
+    public string GetStorageRoot(string repositoryRoot) =>
+        RepositoryPathGuard.ResolveContainedPath(repositoryRoot, ".fractal-memory");
 
     private static IReadOnlyDictionary<object, object?>? GetSection(IReadOnlyDictionary<object, object?> source, string key) =>
         source.TryGetValue(key, out var section) ? section as IReadOnlyDictionary<object, object?> : null;
@@ -180,25 +211,56 @@ public sealed class NodeService(
         CancellationToken cancellationToken,
         NodeFileFormat format = NodeFileFormat.Markdown)
     {
+        if (!Enum.IsDefined(format))
+        {
+            throw new ArgumentOutOfRangeException(nameof(format), "Node format must be Markdown or Html.");
+        }
+
         var repositoryRoot = repositoryService.FindRepositoryRoot(workingDirectory)
             ?? throw new InvalidOperationException("No FractalMemory repository found.");
 
         var normalizedPath = NormalizeNodePath(nodePath);
         var storageRoot = repositoryService.GetStorageRoot(repositoryRoot);
-        var fullPath = Path.Combine(storageRoot, normalizedPath.Replace('/', Path.DirectorySeparatorChar));
+        var fullPath = RepositoryPathGuard.ResolveContainedPath(storageRoot, normalizedPath);
         if (fileSystemService.DirectoryExists(fullPath))
         {
             throw new InvalidOperationException($"Node '{normalizedPath}' already exists.");
         }
 
-        fileSystemService.CreateDirectory(fullPath);
-        fileSystemService.CreateDirectory(Path.Combine(fullPath, "children"));
-        fileSystemService.CreateDirectory(Path.Combine(fullPath, "artifacts"));
-
-        var templates = await templateService.GetNodeTemplatesAsync(repositoryRoot, Path.GetFileName(normalizedPath), format, cancellationToken);
-        foreach (var template in templates)
+        var config = await repositoryService.LoadConfigAsync(repositoryRoot, cancellationToken);
+        var templates = await templateService.GetNodeTemplatesAsync(
+            repositoryRoot,
+            Path.GetFileName(normalizedPath),
+            format,
+            config.Metadata.FrontMatter,
+            cancellationToken);
+        var stagingRelativePath = $".staging/{Guid.NewGuid():N}";
+        var stagingPath = RepositoryPathGuard.ResolveContainedPath(storageRoot, stagingRelativePath);
+        try
         {
-            await fileSystemService.WriteAllTextAsync(Path.Combine(fullPath, template.Key), template.Value + Environment.NewLine, cancellationToken);
+            fileSystemService.CreateDirectory(stagingPath);
+            fileSystemService.CreateDirectory(Path.Combine(stagingPath, "children"));
+            fileSystemService.CreateDirectory(Path.Combine(stagingPath, "artifacts"));
+            foreach (var template in templates)
+            {
+                var destination = RepositoryPathGuard.ResolveContainedPath(stagingPath, template.Key);
+                await fileSystemService.WriteAllTextAsync(destination, template.Value + Environment.NewLine, cancellationToken);
+            }
+
+            // Parse the entire staged node before making it visible to repository readers.
+            await LoadNodeAsync(repositoryRoot, stagingRelativePath, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            fileSystemService.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+            // Recheck after creating ancestors: another process may have replaced one with a link.
+            RepositoryPathGuard.EnsureContainedPath(storageRoot, fullPath);
+            fileSystemService.MoveDirectory(stagingPath, fullPath);
+        }
+        finally
+        {
+            if (fileSystemService.DirectoryExists(stagingPath))
+            {
+                fileSystemService.DeleteDirectory(stagingPath);
+            }
         }
 
         return await LoadNodeAsync(repositoryRoot, normalizedPath, cancellationToken);
@@ -212,52 +274,58 @@ public sealed class NodeService(
         return await LoadNodeAsync(repositoryRoot, normalizedPath, cancellationToken);
     }
 
-    public async Task<IReadOnlyList<MemoryNode>> GetAllNodesAsync(string repositoryRoot, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<MemoryNode>> GetAllNodesAsync(
+        string repositoryRoot, CancellationToken cancellationToken, bool bypassCache = false, string? scope = null)
     {
         var storageRoot = repositoryService.GetStorageRoot(repositoryRoot);
-        var fingerprint = ComputeNodeFingerprint(storageRoot);
+        var config = await repositoryService.LoadConfigAsync(repositoryRoot, cancellationToken);
+        var scopedRoot = scope is null ? storageRoot : RepositoryPathGuard.ResolveContainedPath(storageRoot, scope);
+        var useCache = !bypassCache && scope is null && config.Indexing.Enabled;
+        var fingerprint = useCache ? ComputeNodeFingerprintForCache(fileSystemService, storageRoot, config.Handoffs.Directory) : null;
         var cacheKey = Path.GetFullPath(repositoryRoot);
-        if (_nodeListingCache.TryGetValue(cacheKey, out var cached) && string.Equals(cached.Fingerprint, fingerprint, StringComparison.Ordinal))
+        if (bypassCache) _nodeListingCache.TryRemove(cacheKey, out _);
+        if (useCache && _nodeListingCache.TryGetValue(cacheKey, out var cached) && string.Equals(cached.Fingerprint, fingerprint, StringComparison.Ordinal))
         {
             return cached.Nodes;
         }
 
-        var fromDiskCache = await cacheReader.TryLoadAsync(repositoryRoot, fingerprint, cancellationToken);
+        var fromDiskCache = useCache ? await cacheReader.TryLoadAsync(repositoryRoot, fingerprint!, cancellationToken) : null;
         if (fromDiskCache is not null)
         {
-            _nodeListingCache[cacheKey] = new NodeListingCacheEntry(fingerprint, fromDiskCache);
+            _nodeListingCache[cacheKey] = new NodeListingCacheEntry(fingerprint!, fromDiskCache);
             return fromDiskCache;
         }
 
-        var directories = EnumerateNodeIndexFiles(storageRoot)
+        var directories = EnumerateNodeIndexFiles(scopedRoot)
             .Select(Path.GetDirectoryName)
             .Where(path => !string.IsNullOrWhiteSpace(path))
             .Cast<string>()
             .Distinct(StringComparer.Ordinal)
-            .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}templates{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
-                && !path.Contains($"{Path.DirectorySeparatorChar}archive{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+            .Where(path => !IsExcludedNodeContent(storageRoot, path, config.Handoffs.Directory))
             .ToArray();
 
         var nodes = new List<MemoryNode>(directories.Length);
         foreach (var directory in directories)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var relativePath = Path.GetRelativePath(storageRoot, directory).Replace(Path.DirectorySeparatorChar, '/');
             nodes.Add(await LoadNodeAsync(repositoryRoot, relativePath, cancellationToken));
         }
 
         var ordered = nodes.OrderBy(node => node.RelativePath, StringComparer.Ordinal).ToArray();
-        _nodeListingCache[cacheKey] = new NodeListingCacheEntry(fingerprint, ordered);
+        if (useCache)
+        {
+            _nodeListingCache[cacheKey] = new NodeListingCacheEntry(fingerprint!, ordered);
+        }
         return ordered;
     }
 
-    private string ComputeNodeFingerprint(string storageRoot) =>
-        ComputeNodeFingerprintForCache(fileSystemService, storageRoot);
-
-    internal static string ComputeNodeFingerprintForCache(IFileSystemService fileSystem, string storageRoot)
+    internal static string ComputeNodeFingerprintForCache(IFileSystemService fileSystem, string storageRoot, string handoffDirectory = "handoffs")
     {
         var entries = new SortedDictionary<string, long>(StringComparer.Ordinal);
-        foreach (var file in EnumerateNodeFingerprintFilesStatic(fileSystem, storageRoot))
+        foreach (var file in EnumerateNodeFingerprintFilesStatic(fileSystem, storageRoot, handoffDirectory))
         {
+            RepositoryPathGuard.EnsureContainedPath(storageRoot, file);
             var relative = Path.GetRelativePath(storageRoot, file).Replace(Path.DirectorySeparatorChar, '/');
             entries[relative] = fileSystem.GetLastWriteTimeUtc(file).UtcTicks;
         }
@@ -277,7 +345,7 @@ public sealed class NodeService(
         return $"{entries.Count}:{Convert.ToHexString(hash)}";
     }
 
-    private static IEnumerable<string> EnumerateNodeFingerprintFilesStatic(IFileSystemService fileSystem, string storageRoot)
+    private static IEnumerable<string> EnumerateNodeFingerprintFilesStatic(IFileSystemService fileSystem, string storageRoot, string handoffDirectory)
     {
         foreach (var path in fileSystem.EnumerateFiles(storageRoot, "*", SearchOption.AllDirectories))
         {
@@ -286,16 +354,21 @@ public sealed class NodeService(
                 continue;
             }
 
-            if (path.Contains($"{Path.DirectorySeparatorChar}templates{Path.DirectorySeparatorChar}", StringComparison.Ordinal) ||
-                path.Contains($"{Path.DirectorySeparatorChar}archive{Path.DirectorySeparatorChar}", StringComparison.Ordinal) ||
-                path.Contains($"{Path.DirectorySeparatorChar}handoffs{Path.DirectorySeparatorChar}", StringComparison.Ordinal) ||
-                path.Contains($"{Path.DirectorySeparatorChar}indexes{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+            if (IsExcludedNodeContent(storageRoot, path, handoffDirectory))
             {
                 continue;
             }
 
             yield return path;
         }
+    }
+
+    internal static bool IsExcludedNodeContent(string storageRoot, string path, string handoffDirectory)
+    {
+        var relative = Path.GetRelativePath(storageRoot, path).Replace(Path.DirectorySeparatorChar, '/');
+        return new[] { "templates", "archive", "handoffs", "indexes", ".staging", handoffDirectory }
+            .Any(prefix => relative == prefix || relative.StartsWith(prefix + "/", StringComparison.Ordinal)) ||
+            relative.Split('/').Contains("artifacts", StringComparer.Ordinal);
     }
 
     internal static bool IsContentExtension(string path)
@@ -309,6 +382,7 @@ public sealed class NodeService(
     public async Task<IReadOnlyList<MemoryNode>> GetChildNodesAsync(string repositoryRoot, MemoryNode node, CancellationToken cancellationToken)
     {
         var childrenDirectory = Path.Combine(node.FullPath, "children");
+        RepositoryPathGuard.EnsureContainedPath(repositoryService.GetStorageRoot(repositoryRoot), childrenDirectory);
         var children = new List<MemoryNode>();
         foreach (var childDirectory in fileSystemService.EnumerateDirectories(childrenDirectory))
         {
@@ -328,7 +402,7 @@ public sealed class NodeService(
     private async Task<MemoryNode> LoadNodeAsync(string repositoryRoot, string normalizedPath, CancellationToken cancellationToken)
     {
         var storageRoot = repositoryService.GetStorageRoot(repositoryRoot);
-        var fullPath = Path.Combine(storageRoot, normalizedPath.Replace('/', Path.DirectorySeparatorChar));
+        var fullPath = RepositoryPathGuard.ResolveContainedPath(storageRoot, normalizedPath);
         if (!fileSystemService.DirectoryExists(fullPath))
         {
             throw new InvalidOperationException($"Node '{normalizedPath}' does not exist.");
@@ -364,6 +438,20 @@ public sealed class NodeService(
             StateContent = state.Content,
             TimelineContent = timeline.Content,
             DecisionsContent = decisions.Content,
+            SourceHashes = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [Path.GetFileName(indexPath)] = index.SourceHash,
+                [statePath is null ? "state.md" : Path.GetFileName(statePath)] = state.SourceHash,
+                [timelinePath is null ? "timeline.md" : Path.GetFileName(timelinePath)] = timeline.SourceHash,
+                [decisionsPath is null ? "decisions.md" : Path.GetFileName(decisionsPath)] = decisions.SourceHash,
+            },
+            SourceStartLines = new Dictionary<string, int>(StringComparer.Ordinal)
+            {
+                [Path.GetFileName(indexPath)] = index.ContentStartLine,
+                [statePath is null ? "state.md" : Path.GetFileName(statePath)] = state.ContentStartLine,
+                [timelinePath is null ? "timeline.md" : Path.GetFileName(timelinePath)] = timeline.ContentStartLine,
+                [decisionsPath is null ? "decisions.md" : Path.GetFileName(decisionsPath)] = decisions.ContentStartLine,
+            },
         };
     }
 
@@ -434,6 +522,7 @@ public sealed class NodeService(
             {
                 Metadata = new NodeMetadata { Title = title },
                 Content = HtmlTextExtractor.ToText(html),
+                SourceHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(html))),
             };
         }
 
@@ -462,12 +551,22 @@ public sealed class ReadService(
     public async Task<OpenNodeResult> OpenAsync(
         string workingDirectory,
         string nodePath,
-        RetrievalDepth depth,
+        RetrievalDepth? depth,
         NodeViewType view,
         CancellationToken cancellationToken)
     {
         var repositoryRoot = repositoryService.FindRepositoryRoot(workingDirectory)
             ?? throw new InvalidOperationException("No FractalMemory repository found.");
+        depth ??= (await repositoryService.LoadConfigAsync(repositoryRoot, cancellationToken)).DefaultDepth;
+        if (!Enum.IsDefined(depth.Value))
+        {
+            throw new ArgumentOutOfRangeException(nameof(depth), "Retrieval depth must be between 0 and 3.");
+        }
+        if (!Enum.IsDefined(view))
+        {
+            throw new ArgumentOutOfRangeException(nameof(view), "Unknown node view.");
+        }
+
         var node = await nodeService.GetNodeAsync(repositoryRoot, nodePath, cancellationToken);
         var children = await nodeService.GetChildNodesAsync(repositoryRoot, node, cancellationToken);
         var structuredState = structuredMemoryService.Parse(node.StateContent, node.RelativePath);
@@ -483,25 +582,44 @@ public sealed class ReadService(
         var showState = depth >= RetrievalDepth.Working || view == NodeViewType.State;
         var showTimeline = depth >= RetrievalDepth.Deep || view == NodeViewType.Timeline;
         var showDecisions = depth >= RetrievalDepth.Deep || view == NodeViewType.Decisions;
+        var currentState = showState
+            ? depth == RetrievalDepth.Deep || view == NodeViewType.State
+                ? node.StateContent
+                : SummarizeWorkingState(node.StateContent)
+            : null;
 
         return new OpenNodeResult
         {
             RelativePath = node.RelativePath,
             Title = title,
             Summary = summary,
-            Depth = depth,
+            Depth = depth.Value,
             View = view,
             IndexSummary = showIndex
                 ? TrimToParagraphs(node.IndexContent, depth == RetrievalDepth.Working ? 2 : 3)
                 : null,
-            CurrentState = showState
-                ? TrimToParagraphs(node.StateContent, depth == RetrievalDepth.Deep ? 3 : 2)
-                : null,
+            CurrentState = currentState,
+            StateTruncated = showState && currentState?.Trim() != node.StateContent.Trim(),
             Children = children.Select(child => $"{child.RelativePath} - {child.Metadata.Summary ?? ExtractSummary(child.IndexContent) ?? child.Metadata.Title ?? Path.GetFileName(child.RelativePath)}").ToArray(),
             SuggestedReads = BuildSuggestedReads(node, children),
             RecentTimeline = showTimeline ? ExtractHighlights(node.TimelineContent, 3) : [],
             RecentDecisions = showDecisions ? ExtractHighlights(node.DecisionsContent, 3) : [],
         };
+    }
+
+    private static string SummarizeWorkingState(string content)
+    {
+        var sections = FractalMemory.Core.Infrastructure.Search.RetrievalPipeline.ParseSections(content);
+        var priorities = new[] { "Current Objective", "Current Goal", "Current State", "Active Constraints",
+            "Next Best Actions", "Key Decisions in Force", "Open Questions" };
+        var selected = sections
+            .Where(section => priorities.Contains(section.Heading, StringComparer.OrdinalIgnoreCase) &&
+                section.Lines.Any(line => !string.IsNullOrWhiteSpace(line)))
+            .OrderBy(section => Array.FindIndex(priorities, heading => heading.Equals(section.Heading, StringComparison.OrdinalIgnoreCase)))
+            .Take(3)
+            .Select(section => $"## {section.Heading}{Environment.NewLine}{Environment.NewLine}{string.Join(Environment.NewLine, section.Lines).Trim()}")
+            .ToArray();
+        return selected.Length == 0 ? TrimToParagraphs(content, 2) : string.Join(Environment.NewLine + Environment.NewLine, selected);
     }
 
     private static IReadOnlyList<string> BuildSuggestedReads(MemoryNode node, IReadOnlyList<MemoryNode> children)
@@ -583,9 +701,18 @@ public sealed class ExportService(
     public async Task<ExportDocument> ExportAsync(
         string workingDirectory,
         string nodePath,
-        ExportMode mode,
+        ExportMode? mode,
         CancellationToken cancellationToken)
     {
+        var repositoryRoot = repositoryService.FindRepositoryRoot(workingDirectory)
+            ?? throw new InvalidOperationException("No FractalMemory repository found.");
+        var config = await repositoryService.LoadConfigAsync(repositoryRoot, cancellationToken);
+        mode ??= config.DefaultExportMode;
+        if (!Enum.IsDefined(mode.Value))
+        {
+            throw new ArgumentOutOfRangeException(nameof(mode), "Export mode must be Compact, Standard, or Verbose.");
+        }
+
         var depth = mode switch
         {
             ExportMode.Compact => RetrievalDepth.Orientation,
@@ -594,9 +721,6 @@ public sealed class ExportService(
             _ => RetrievalDepth.Orientation,
         };
 
-        var repositoryRoot = repositoryService.FindRepositoryRoot(workingDirectory)
-            ?? throw new InvalidOperationException("No FractalMemory repository found.");
-        var config = await repositoryService.LoadConfigAsync(repositoryRoot, cancellationToken);
         var node = await nodeService.GetNodeAsync(repositoryRoot, nodePath, cancellationToken);
         var opened = await readService.OpenAsync(workingDirectory, nodePath, depth, NodeViewType.Index, cancellationToken);
         var evidence = FractalMemory.Core.Infrastructure.Search.SearchService.BuildNodeEvidence(node, config.Retrieval.MaxSnippetLines);
@@ -610,7 +734,7 @@ public sealed class ExportService(
         {
             RelativePath = opened.RelativePath,
             Title = opened.Title,
-            Mode = mode,
+            Mode = mode.Value,
             Summary = opened.Summary,
             CurrentState = opened.CurrentState ?? string.Empty,
             Children = opened.Children,
@@ -665,10 +789,13 @@ public sealed class HandoffService(
             .ToArray();
         var freshness = node.Metadata.LastUpdated?.ToString("O", CultureInfo.InvariantCulture) ?? "Unknown";
 
-        var timestamp = clock.UtcNow.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture);
+        var timestamp = clock.UtcNow.ToString("yyyyMMdd-HHmmssfff", CultureInfo.InvariantCulture);
         var safeName = opened.RelativePath.Replace('/', '-');
-        var handoffRelativePath = Path.Combine(".fractal-memory", config.Handoffs.Directory, $"{timestamp}-{safeName}.md");
-        var fullPath = Path.Combine(repositoryRoot, handoffRelativePath);
+        var storageRoot = repositoryService.GetStorageRoot(repositoryRoot);
+        var handoffDirectory = RepositoryPathGuard.ResolveContainedPath(storageRoot, config.Handoffs.Directory);
+        RepositoryPathGuard.CreateContainedDirectory(storageRoot, config.Handoffs.Directory, fileSystemService);
+        var fileName = $"{timestamp}-{safeName}-{Guid.NewGuid():N}.md";
+        var fullPath = RepositoryPathGuard.ResolveContainedPath(handoffDirectory, fileName);
 
         var content = new StringBuilder()
             .AppendLine($"# Handoff: {opened.Title}")
@@ -719,7 +846,7 @@ public sealed class HandoffService(
         return new HandoffPacket
         {
             RelativePath = opened.RelativePath,
-            HandoffFilePath = handoffRelativePath.Replace(Path.DirectorySeparatorChar, '/'),
+            HandoffFilePath = Path.GetRelativePath(repositoryRoot, fullPath).Replace(Path.DirectorySeparatorChar, '/'),
             ProjectBranch = answerContext.ProjectBranch,
             CurrentGoal = currentGoal,
             CurrentState = currentState,
@@ -774,13 +901,37 @@ public sealed class ValidationService(
 
     public async Task<ValidationReport> ValidateAsync(string workingDirectory, CancellationToken cancellationToken)
     {
+        try { return await ValidateCoreAsync(workingDirectory, cancellationToken); }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return new ValidationReport { Issues = [new ValidationIssue
+            {
+                Severity = ValidationSeverity.Error,
+                RelativePath = ".",
+                Message = $"Could not inspect repository storage: {exception.Message} Check file and directory permissions.",
+            }] };
+        }
+    }
+
+    private async Task<ValidationReport> ValidateCoreAsync(string workingDirectory, CancellationToken cancellationToken)
+    {
         var repositoryRoot = repositoryService.FindRepositoryRoot(workingDirectory)
             ?? throw new InvalidOperationException("No FractalMemory repository found.");
         var config = await repositoryService.LoadConfigAsync(repositoryRoot, cancellationToken);
         var issues = new List<ValidationIssue>();
         var storageRoot = repositoryService.GetStorageRoot(repositoryRoot);
+        foreach (var reparsePoint in RepositoryPathGuard.EnumerateReparsePoints(storageRoot))
+        {
+            issues.Add(new ValidationIssue
+            {
+                Severity = ValidationSeverity.Error,
+                RelativePath = Path.GetRelativePath(storageRoot, reparsePoint).Replace(Path.DirectorySeparatorChar, '/'),
+                Message = "Symbolic links and reparse points are not allowed inside FractalMem storage.",
+            });
+        }
+
         var memoryFiles = EnumerateMemoryFiles(storageRoot)
-            .Where(path => !IsIgnoredValidationPath(storageRoot, path))
+            .Where(path => !NodeService.IsExcludedNodeContent(storageRoot, path, config.Handoffs.Directory))
             .ToArray();
         var filesByDirectory = memoryFiles
             .GroupBy(path => Path.GetDirectoryName(path), StringComparer.Ordinal)
@@ -789,8 +940,14 @@ public sealed class ValidationService(
                 group => group.Key!,
                 group => BuildNodeFileMap(group),
                 StringComparer.Ordinal);
+        foreach (var directory in EnumerateNodeScaffolds(storageRoot, config.Handoffs.Directory))
+        {
+            filesByDirectory.TryAdd(directory, new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase));
+        }
         var candidateDirectories = filesByDirectory
-            .Where(pair => pair.Value.ContainsKey("index") || pair.Value.ContainsKey("state"))
+            .Where(pair => pair.Value.Count > 0 ||
+                fileSystemService.DirectoryExists(Path.Combine(pair.Key, "children")) ||
+                fileSystemService.DirectoryExists(Path.Combine(pair.Key, "artifacts")))
             .Select(pair => pair.Key)
             .ToArray();
 
@@ -847,12 +1004,13 @@ public sealed class ValidationService(
                         issues.Add(new ValidationIssue { Severity = ValidationSeverity.Warning, RelativePath = relativePath, Message = $"{Path.GetFileName(memoryFile)} is empty." });
                     }
 
-                    if (string.IsNullOrWhiteSpace(document.Metadata.Title))
+                    var isMarkdown = Path.GetExtension(memoryFile).Equals(".md", StringComparison.OrdinalIgnoreCase);
+                    if ((config.Metadata.FrontMatter || !isMarkdown) && string.IsNullOrWhiteSpace(document.Metadata.Title))
                     {
                         issues.Add(new ValidationIssue { Severity = ValidationSeverity.Warning, RelativePath = relativePath, Message = $"{Path.GetFileName(memoryFile)} is missing a title." });
                     }
 
-                    if (Path.GetExtension(memoryFile).Equals(".md", StringComparison.OrdinalIgnoreCase) && document.Metadata.LastUpdated is null)
+                    if (config.Metadata.FrontMatter && isMarkdown && document.Metadata.LastUpdated is null)
                     {
                         issues.Add(new ValidationIssue { Severity = ValidationSeverity.Warning, RelativePath = relativePath, Message = $"{Path.GetFileName(memoryFile)} is missing last_updated." });
                     }
@@ -921,7 +1079,9 @@ public sealed class ValidationService(
             {
                 Severity = ValidationSeverity.Warning,
                 RelativePath = "indexes",
-                Message = "Indexes may be stale.",
+                Message = "Indexes may be stale. Run 'fm index refresh'." +
+                    (config.Indexing.Enabled && !config.Indexing.RefreshOnWrite
+                        ? " Set indexing.refresh_on_write: true in config.yaml to refresh automatically after writes; older templates explicitly disabled this setting." : ""),
             });
         }
 
@@ -939,13 +1099,26 @@ public sealed class ValidationService(
         }
     }
 
-    private static bool IsIgnoredValidationPath(string storageRoot, string path)
+    private IEnumerable<string> EnumerateNodeScaffolds(string storageRoot, string handoffDirectory)
     {
-        var relative = Path.GetRelativePath(storageRoot, path).Replace(Path.DirectorySeparatorChar, '/');
-        return relative.StartsWith("templates/", StringComparison.Ordinal) ||
-            relative.StartsWith("handoffs/", StringComparison.Ordinal) ||
-            relative.StartsWith("indexes/", StringComparison.Ordinal) ||
-            relative.Contains("/artifacts/", StringComparison.Ordinal);
+        var pending = new Stack<string>();
+        pending.Push(storageRoot);
+        while (pending.TryPop(out var directory))
+        {
+            var children = fileSystemService.EnumerateDirectories(directory).ToArray();
+            if (children.Any(child => Path.GetFileName(child) is "children" or "artifacts"))
+            {
+                yield return directory;
+            }
+
+            foreach (var child in children)
+            {
+                if (!NodeService.IsExcludedNodeContent(storageRoot, child, handoffDirectory))
+                {
+                    pending.Push(child);
+                }
+            }
+        }
     }
 
     private static Dictionary<string, string> BuildNodeFileMap(IEnumerable<string> files)

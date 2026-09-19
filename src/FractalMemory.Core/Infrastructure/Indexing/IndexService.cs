@@ -28,7 +28,14 @@ public sealed class IndexService(
         var repositoryRoot = repositoryService.FindRepositoryRoot(workingDirectory)
             ?? throw new InvalidOperationException("No FractalMemory repository found.");
 
-        var nodes = await nodeService.GetAllNodesAsync(repositoryRoot, cancellationToken);
+        var config = await repositoryService.LoadConfigAsync(repositoryRoot, cancellationToken);
+        var storageRoot = repositoryService.GetStorageRoot(repositoryRoot);
+        var fingerprint = NodeService.ComputeNodeFingerprintForCache(fileSystemService, storageRoot, config.Handoffs.Directory);
+        var nodes = await nodeService.GetAllNodesAsync(repositoryRoot, cancellationToken, bypassCache: true);
+        if (fingerprint != NodeService.ComputeNodeFingerprintForCache(fileSystemService, storageRoot, config.Handoffs.Directory))
+        {
+            throw new InvalidOperationException("Memory files changed during index refresh. Retry the refresh.");
+        }
         var aliases = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
         var tags = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
         var paths = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -63,49 +70,51 @@ public sealed class IndexService(
         var aliasOutput = aliases.ToDictionary(pair => pair.Key, pair => (IReadOnlyList<string>)pair.Value.OrderBy(item => item, StringComparer.Ordinal).ToArray(), StringComparer.Ordinal);
         var tagOutput = tags.ToDictionary(pair => pair.Key, pair => (IReadOnlyList<string>)pair.Value.OrderBy(item => item, StringComparer.Ordinal).ToArray(), StringComparer.Ordinal);
 
-        var indexRoot = Path.Combine(repositoryService.GetStorageRoot(repositoryRoot), "indexes");
-        await fileSystemService.WriteAllTextAsync(Path.Combine(indexRoot, "aliases.yaml"), YamlSerializer.Serialize(aliasOutput), cancellationToken);
-        await fileSystemService.WriteAllTextAsync(Path.Combine(indexRoot, "tags.yaml"), YamlSerializer.Serialize(tagOutput), cancellationToken);
-        await fileSystemService.WriteAllTextAsync(Path.Combine(indexRoot, "paths.yaml"), YamlSerializer.Serialize(paths), cancellationToken);
+        var indexRoot = RepositoryPathGuard.ResolveContainedPath(storageRoot, "indexes");
+        await fileSystemService.WriteAllTextAsync(RepositoryPathGuard.ResolveContainedPath(indexRoot, "aliases.yaml"), YamlSerializer.Serialize(aliasOutput), cancellationToken);
+        await fileSystemService.WriteAllTextAsync(RepositoryPathGuard.ResolveContainedPath(indexRoot, "tags.yaml"), YamlSerializer.Serialize(tagOutput), cancellationToken);
+        await fileSystemService.WriteAllTextAsync(RepositoryPathGuard.ResolveContainedPath(indexRoot, "paths.yaml"), YamlSerializer.Serialize(paths), cancellationToken);
 
-        var fingerprint = NodeService.ComputeNodeFingerprintForCache(fileSystemService, repositoryService.GetStorageRoot(repositoryRoot));
         await RefreshCacheAsync(indexRoot, nodes, fingerprint, cancellationToken);
     }
 
     private async Task RefreshCacheAsync(string indexRoot, IReadOnlyList<MemoryNode> nodes, string fingerprint, CancellationToken cancellationToken)
     {
-        var cacheRoot = Path.Combine(indexRoot, "cache");
-        var nodeCacheRoot = Path.Combine(cacheRoot, "nodes");
+        var cacheRoot = RepositoryPathGuard.ResolveContainedPath(indexRoot, "cache");
+        var nodeCacheRoot = RepositoryPathGuard.ResolveContainedPath(cacheRoot, "nodes");
         fileSystemService.CreateDirectory(cacheRoot);
         fileSystemService.CreateDirectory(nodeCacheRoot);
 
-        var manifestPath = Path.Combine(cacheRoot, "manifest.json");
+        var manifestPath = RepositoryPathGuard.ResolveContainedPath(cacheRoot, "manifest.json");
         var manifest = await LoadManifestAsync(manifestPath, cancellationToken);
         var nextEntries = new Dictionary<string, IndexCacheManifestEntry>(StringComparer.Ordinal);
 
         foreach (var node in nodes)
         {
-            var hashes = BuildFileHashes(node);
+            var hashes = node.SourceHashes;
             var safeName = SanitizePath(node.RelativePath);
             var cacheFileName = $"{safeName}.json";
-            var cacheFilePath = Path.Combine(nodeCacheRoot, cacheFileName);
+            var cacheFilePath = RepositoryPathGuard.ResolveContainedPath(nodeCacheRoot, cacheFileName);
+            var cacheDocument = BuildCacheDocument(node, hashes);
+            var json = JsonSerializer.Serialize(cacheDocument, JsonOptions) + Environment.NewLine;
+            var cacheHash = Hash(json);
 
             if (manifest.Nodes.TryGetValue(node.RelativePath, out var existing) &&
-                existing.FileHashes.Count == hashes.Count &&
-                HashesEqual(existing.FileHashes, hashes) &&
-                fileSystemService.FileExists(Path.Combine(nodeCacheRoot, existing.CacheFile)))
+                existing is not null && existing.CacheFile == cacheFileName &&
+                existing.CacheHash == cacheHash &&
+                fileSystemService.FileExists(cacheFilePath) &&
+                Hash(await fileSystemService.ReadAllTextAsync(cacheFilePath, cancellationToken)) == cacheHash)
             {
                 nextEntries[node.RelativePath] = existing;
                 continue;
             }
 
-            var cacheDocument = BuildCacheDocument(node, hashes);
-            var json = JsonSerializer.Serialize(cacheDocument, JsonOptions);
-            await fileSystemService.WriteAllTextAsync(cacheFilePath, json + Environment.NewLine, cancellationToken);
+            await fileSystemService.WriteAllTextAsync(cacheFilePath, json, cancellationToken);
 
             nextEntries[node.RelativePath] = new IndexCacheManifestEntry
             {
                 CacheFile = cacheFileName,
+                CacheHash = cacheHash,
                 CachedAt = clock.UtcNow,
                 FileHashes = hashes.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal),
             };
@@ -113,11 +122,16 @@ public sealed class IndexService(
 
         foreach (var stale in manifest.Nodes.Where(entry => !nextEntries.ContainsKey(entry.Key)))
         {
-            fileSystemService.DeleteFile(Path.Combine(nodeCacheRoot, stale.Value.CacheFile));
+            if (stale.Value is not null && NodeListingCacheReader.IsSafeCacheFileName(stale.Value.CacheFile) &&
+                !nextEntries.Values.Any(entry => entry.CacheFile == stale.Value.CacheFile))
+            {
+                fileSystemService.DeleteFile(RepositoryPathGuard.ResolveContainedPath(nodeCacheRoot, stale.Value.CacheFile));
+            }
         }
 
         var nextManifest = new IndexCacheManifest
         {
+            FormatVersion = IndexCacheManifest.CurrentFormatVersion,
             RefreshedAt = clock.UtcNow,
             Fingerprint = fingerprint,
             Nodes = nextEntries,
@@ -133,8 +147,16 @@ public sealed class IndexService(
             return new IndexCacheManifest();
         }
 
-        var json = await fileSystemService.ReadAllTextAsync(manifestPath, cancellationToken);
-        return JsonSerializer.Deserialize<IndexCacheManifest>(json, JsonOptions) ?? new IndexCacheManifest();
+        try
+        {
+            var json = await fileSystemService.ReadAllTextAsync(manifestPath, cancellationToken);
+            var manifest = JsonSerializer.Deserialize<IndexCacheManifest>(json, JsonOptions);
+            return manifest is { Nodes: not null } ? manifest : new IndexCacheManifest();
+        }
+        catch (JsonException)
+        {
+            return new IndexCacheManifest();
+        }
     }
 
     private NodeCacheDocument BuildCacheDocument(MemoryNode node, IReadOnlyDictionary<string, string> hashes)
@@ -146,6 +168,7 @@ public sealed class IndexService(
             Metadata = node.Metadata,
             StateSchema = structuredMemoryService.Parse(node.StateContent, node.RelativePath),
             FileHashes = hashes.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal),
+            SourceStartLines = node.SourceStartLines.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal),
             IndexFileName = node.IndexFileName,
             StateFileName = node.StateFileName,
             TimelineFileName = node.TimelineFileName,
@@ -186,39 +209,14 @@ public sealed class IndexService(
         };
     }
 
-    private static IReadOnlyDictionary<string, string> BuildFileHashes(MemoryNode node) =>
-        new Dictionary<string, string>(StringComparer.Ordinal)
-        {
-            [node.IndexFileName] = Hash(node.IndexContent),
-            [node.StateFileName] = Hash(node.StateContent),
-            [node.TimelineFileName] = Hash(node.TimelineContent),
-            [node.DecisionsFileName] = Hash(node.DecisionsContent),
-        };
-
-    private static bool HashesEqual(IReadOnlyDictionary<string, string> left, IReadOnlyDictionary<string, string> right)
-    {
-        if (left.Count != right.Count)
-        {
-            return false;
-        }
-
-        foreach (var (key, value) in left)
-        {
-            if (!right.TryGetValue(key, out var other) || !string.Equals(value, other, StringComparison.Ordinal))
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    private static string Hash(string content)
+    internal static string Hash(string content)
     {
         var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(content));
         return Convert.ToHexString(bytes);
     }
 
     private static string SanitizePath(string relativePath) =>
-        relativePath.Replace('/', '_').Replace('\\', '_');
+        System.Text.RegularExpressions.Regex.IsMatch(relativePath, @"^[a-z0-9/-]+$")
+            ? relativePath.Replace('/', '_')
+            : "_legacy_" + Hash(relativePath);
 }

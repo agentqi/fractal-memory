@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using FractalMemory.Core.Application.Services;
@@ -20,19 +21,23 @@ public sealed class YamlFrontMatterParser : IFrontMatterParser
     {
         ArgumentNullException.ThrowIfNull(markdown);
 
-        var match = FrontMatterRegex.Match(markdown);
+        var sourceHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(markdown)));
+        var normalized = markdown.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
+        var match = FrontMatterRegex.Match(normalized);
         if (!match.Success)
         {
             return new ParsedMarkdownDocument
             {
                 Metadata = new NodeMetadata(),
-                Content = markdown,
+                Content = normalized,
                 HasFrontMatter = false,
+                SourceHash = sourceHash,
             };
         }
 
         var yaml = match.Groups[1].Value;
-        var body = markdown[match.Length..];
+        var body = normalized[match.Length..];
+        var contentOffset = match.Length + body.Length - body.TrimStart().Length;
 
         Dictionary<object, object?>? data;
         try
@@ -49,6 +54,8 @@ public sealed class YamlFrontMatterParser : IFrontMatterParser
             Metadata = MapMetadata(data ?? []),
             Content = body.Trim(),
             HasFrontMatter = true,
+            ContentStartLine = 1 + normalized[..contentOffset].Count(character => character == '\n'),
+            SourceHash = sourceHash,
         };
     }
 

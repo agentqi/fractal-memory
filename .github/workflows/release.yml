@@ -1,0 +1,49 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: 1
+  DOTNET_NOLOGO: 1
+
+jobs:
+  release:
+    name: Publish NuGet packages and GitHub release
+    runs-on: ubuntu-latest
+    environment: release
+    env:
+      GH_TOKEN: ${{ github.token }}
+      NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-dotnet@v6.0.0
+        with:
+          dotnet-version: 10.0.x
+      - name: Verify tag and project versions match
+        shell: bash
+        run: |
+          tag_version=${GITHUB_REF_NAME#v}
+          project_version=$(sed -n 's/.*<VersionPrefix>\([^<]*\)<.*/\1/p' Directory.Build.props)
+          test "$tag_version" = "$project_version"
+          test -n "${NUGET_API_KEY:-}"
+      - run: dotnet restore FractalMemory.sln
+      - run: dotnet build FractalMemory.sln --configuration Release --no-restore -warnaserror
+      - run: dotnet test --solution FractalMemory.sln --configuration Release --no-build
+      - run: dotnet pack FractalMemory.sln --configuration Release --no-build --output artifacts
+      - name: Verify installable release packages
+        shell: bash
+        run: |
+          version=${GITHUB_REF_NAME#v}
+          bash scripts/smoke-packages.sh artifacts "$version"
+      - name: Create draft GitHub release
+        run: gh release create "$GITHUB_REF_NAME" artifacts/*.nupkg artifacts/*.snupkg --verify-tag --generate-notes --draft
+      - name: Publish packages to NuGet
+        run: dotnet nuget push "artifacts/*.nupkg" --source https://api.nuget.org/v3/index.json --api-key "$NUGET_API_KEY" --skip-duplicate
+      - name: Publish GitHub release
+        run: gh release edit "$GITHUB_REF_NAME" --draft=false

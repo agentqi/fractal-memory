@@ -15,7 +15,7 @@ public sealed class RepositoryWorkflowTests
         var repositoryService = provider.GetRequiredService<IRepositoryService>();
         var temp = TestEnvironment.CreateTempDirectory();
 
-        await repositoryService.InitializeAsync(temp, CancellationToken.None);
+        await repositoryService.InitializeAsync(temp, TestContext.Current.CancellationToken);
 
         Assert.True(File.Exists(Path.Combine(temp, ".fractal-memory", "config.yaml")));
         Assert.True(File.Exists(Path.Combine(temp, ".fractal-memory", "root", "index.md")));
@@ -32,8 +32,8 @@ public sealed class RepositoryWorkflowTests
         var nodeService = provider.GetRequiredService<INodeService>();
         var temp = TestEnvironment.CreateTempDirectory();
 
-        await repositoryService.InitializeAsync(temp, CancellationToken.None);
-        var node = await nodeService.CreateNodeAsync(temp, @"projects\flowone/children/frontend", CancellationToken.None);
+        await repositoryService.InitializeAsync(temp, TestContext.Current.CancellationToken);
+        var node = await nodeService.CreateNodeAsync(temp, @"projects\flowone/children/frontend", TestContext.Current.CancellationToken);
 
         Assert.Equal("projects/flowone/children/frontend", node.RelativePath);
         Assert.True(File.Exists(Path.Combine(temp, ".fractal-memory", "projects", "flowone", "children", "frontend", "index.md")));
@@ -53,10 +53,10 @@ public sealed class RepositoryWorkflowTests
         var validationService = provider.GetRequiredService<IValidationService>();
         var temp = TestEnvironment.CreateTempDirectory();
 
-        await repositoryService.InitializeAsync(temp, CancellationToken.None);
-        var node = await nodeService.CreateNodeAsync(temp, "projects/html-node", CancellationToken.None, NodeFileFormat.Html);
+        await repositoryService.InitializeAsync(temp, TestContext.Current.CancellationToken);
+        var node = await nodeService.CreateNodeAsync(temp, "projects/html-node", TestContext.Current.CancellationToken, NodeFileFormat.Html);
         var nodeRoot = Path.Combine(temp, ".fractal-memory", "projects", "html-node");
-        await File.WriteAllTextAsync(Path.Combine(nodeRoot, "state.html"), """
+        await TestFile.WriteAllTextAsync(Path.Combine(nodeRoot, "state.html"), """
             <!doctype html>
             <html lang="en">
             <head><title>HTML Node State</title></head>
@@ -67,9 +67,9 @@ public sealed class RepositoryWorkflowTests
             </html>
             """);
 
-        var opened = await readService.OpenAsync(temp, "projects/html-node", RetrievalDepth.Working, NodeViewType.Index, CancellationToken.None);
-        var results = await searchService.SearchAsync(temp, "first-class HTML node files", CancellationToken.None);
-        var report = await validationService.ValidateAsync(temp, CancellationToken.None);
+        var opened = await readService.OpenAsync(temp, "projects/html-node", RetrievalDepth.Working, NodeViewType.Index, TestContext.Current.CancellationToken);
+        var results = await searchService.SearchAsync(temp, "first-class HTML node files", TestContext.Current.CancellationToken);
+        var report = await validationService.ValidateAsync(temp, TestContext.Current.CancellationToken);
 
         Assert.Equal("index.html", node.IndexFileName);
         Assert.True(File.Exists(Path.Combine(nodeRoot, "index.html")));
@@ -87,8 +87,8 @@ public sealed class RepositoryWorkflowTests
         var nodeService = provider.GetRequiredService<INodeService>();
         var temp = TestEnvironment.CreateTempDirectory();
 
-        await repositoryService.InitializeAsync(temp, CancellationToken.None);
-        await File.WriteAllTextAsync(Path.Combine(temp, ".fractal-memory", "templates", "node", "index.md"), """
+        await repositoryService.InitializeAsync(temp, TestContext.Current.CancellationToken);
+        await TestFile.WriteAllTextAsync(Path.Combine(temp, ".fractal-memory", "templates", "node", "index.md"), """
             ---
             title: {{TITLE}}
             summary: Custom template for {{TITLE}}.
@@ -97,10 +97,10 @@ public sealed class RepositoryWorkflowTests
             # Custom {{TITLE}}
             """);
 
-        await nodeService.CreateNodeAsync(temp, "projects/custom-template", CancellationToken.None);
+        await nodeService.CreateNodeAsync(temp, "projects/custom-template", TestContext.Current.CancellationToken);
 
         var indexPath = Path.Combine(temp, ".fractal-memory", "projects", "custom-template", "index.md");
-        var markdown = await File.ReadAllTextAsync(indexPath);
+        var markdown = await TestFile.ReadAllTextAsync(indexPath);
         Assert.Contains("Custom Custom Template", markdown, StringComparison.Ordinal);
         Assert.Contains("Custom template for Custom Template.", markdown, StringComparison.Ordinal);
     }

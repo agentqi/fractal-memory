@@ -1,5 +1,7 @@
 using FractalMemory.Core.Application.Services;
 using FractalMemory.Core.Domain.Models;
+using FractalMemory.Core.Domain.Rules;
+using FractalMemory.Core.Infrastructure.Files;
 using FractalMemory.Core.Infrastructure.Parsing;
 using YamlDotNet.Serialization;
 
@@ -17,15 +19,16 @@ public sealed class SearchService(
     public async Task<IReadOnlyList<SearchResult>> SearchAsync(string workingDirectory, string query, CancellationToken cancellationToken, int? limit = null, string? scope = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(query);
+        if (limit is <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(limit), "Search limit must be a positive integer.");
+        }
 
         var repositoryRoot = repositoryService.FindRepositoryRoot(workingDirectory)
             ?? throw new InvalidOperationException("No FractalMemory repository found.");
         var config = await repositoryService.LoadConfigAsync(repositoryRoot, cancellationToken);
-        var allNodes = await nodeService.GetAllNodesAsync(repositoryRoot, cancellationToken);
         var normalizedScope = NormalizeScope(scope);
-        var nodes = normalizedScope is null
-            ? (IReadOnlyList<MemoryNode>)allNodes
-            : allNodes.Where(node => MatchesScope(node.RelativePath, normalizedScope)).ToArray();
+        var nodes = await nodeService.GetAllNodesAsync(repositoryRoot, cancellationToken, scope: normalizedScope);
         var profile = RetrievalPipeline.BuildQueryProfile(query);
 
         var perNodeBests = new SearchResult?[nodes.Count];
@@ -44,7 +47,7 @@ public sealed class SearchService(
 
         var results = perNodeBests.Where(item => item is not null).Cast<SearchResult>().ToList();
 
-        var effectiveLimit = limit is > 0 ? limit.Value : config.Retrieval.DiagnosticTopK;
+        var effectiveLimit = limit ?? config.Retrieval.DiagnosticTopK;
         return results
             .OrderByDescending(result => result.Score)
             .ThenByDescending(result => FileTypePriority(result.MatchedFile))
@@ -70,15 +73,26 @@ public sealed class SearchService(
         string? scope,
         CancellationToken cancellationToken)
     {
+        if (limit <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(limit), "Recent item limit must be a positive integer.");
+        }
+
+        if (days < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(days), "Recent day range cannot be negative.");
+        }
+
         var repositoryRoot = repositoryService.FindRepositoryRoot(workingDirectory)
             ?? throw new InvalidOperationException("No FractalMemory repository found.");
+        var config = await repositoryService.LoadConfigAsync(repositoryRoot, cancellationToken);
         var storageRoot = repositoryService.GetStorageRoot(repositoryRoot);
         var cutoff = clock.UtcNow.AddDays(-days);
         var normalizedScope = NormalizeScope(scope);
         var pathTitles = await LoadPathTitlesAsync(storageRoot, cancellationToken);
         var latestByNode = new Dictionary<string, RecentNodeFile>(StringComparer.Ordinal);
 
-        foreach (var file in EnumerateRecentNodeFiles(storageRoot))
+        foreach (var file in EnumerateRecentNodeFiles(storageRoot, config.Handoffs.Directory))
         {
             cancellationToken.ThrowIfCancellationRequested();
             var directory = Path.GetDirectoryName(file);
@@ -151,8 +165,8 @@ public sealed class SearchService(
             {
                 RelativePath = node.RelativePath,
                 Title = title,
-                MatchedFile = "index.md",
-                SourcePath = $"{node.RelativePath}/index.md",
+                MatchedFile = node.IndexFileName,
+                SourcePath = $"{node.RelativePath}/{node.IndexFileName}",
                 Snippet = title,
                 Score = 900,
                 ScoreBreakdown = new Dictionary<string, int>(StringComparer.Ordinal) { ["exact_title"] = 900 },
@@ -165,8 +179,8 @@ public sealed class SearchService(
             {
                 RelativePath = node.RelativePath,
                 Title = title,
-                MatchedFile = "index.md",
-                SourcePath = $"{node.RelativePath}/index.md",
+                MatchedFile = node.IndexFileName,
+                SourcePath = $"{node.RelativePath}/{node.IndexFileName}",
                 Snippet = $"Alias match: {query}",
                 Score = 820,
                 ScoreBreakdown = new Dictionary<string, int>(StringComparer.Ordinal) { ["alias"] = 820 },
@@ -179,8 +193,8 @@ public sealed class SearchService(
             {
                 RelativePath = node.RelativePath,
                 Title = title,
-                MatchedFile = "index.md",
-                SourcePath = $"{node.RelativePath}/index.md",
+                MatchedFile = node.IndexFileName,
+                SourcePath = $"{node.RelativePath}/{node.IndexFileName}",
                 Snippet = $"Tag match: {query}",
                 Score = 760,
                 ScoreBreakdown = new Dictionary<string, int>(StringComparer.Ordinal) { ["tag"] = 760 },
@@ -197,6 +211,7 @@ public sealed class SearchService(
         foreach (var artifact in fileSystemService.EnumerateFiles(artifactsDirectory, "*", SearchOption.AllDirectories))
         {
             cancellationToken.ThrowIfCancellationRequested();
+            RepositoryPathGuard.EnsureContainedPath(node.FullPath, artifact);
             if (!IsSearchableArtifact(artifact))
             {
                 continue;
@@ -234,7 +249,7 @@ public sealed class SearchService(
         }
 
         var normalized = scope.Trim().Replace('\\', '/').Trim('/');
-        return normalized.Length == 0 ? null : normalized;
+        return normalized.Length == 0 ? null : NodePathRules.Normalize(normalized.ToLowerInvariant());
     }
 
     private static bool MatchesScope(string relativePath, string scope)
@@ -260,8 +275,8 @@ public sealed class SearchService(
             SourcePath = candidate.SourcePath,
             Snippet = candidate.Snippet.Length > 240 ? candidate.Snippet[..240] + "..." : candidate.Snippet,
             SectionHeading = candidate.SectionHeading,
-            StartLine = candidate.StartLine,
-            EndLine = candidate.EndLine,
+            StartLine = RetrievalPipeline.ToSourceLine(node, candidate.MatchedFile, candidate.StartLine),
+            EndLine = RetrievalPipeline.ToSourceLine(node, candidate.MatchedFile, candidate.EndLine),
             Score = candidate.Score,
             ScoreBreakdown = candidate.Breakdown,
         }).ToArray();
@@ -276,7 +291,7 @@ public sealed class SearchService(
 
     private async Task<IReadOnlyDictionary<string, string>> LoadPathTitlesAsync(string storageRoot, CancellationToken cancellationToken)
     {
-        var pathsIndex = Path.Combine(storageRoot, "indexes", "paths.yaml");
+        var pathsIndex = RepositoryPathGuard.ResolveContainedPath(storageRoot, "indexes/paths.yaml");
         if (!fileSystemService.FileExists(pathsIndex))
         {
             return new Dictionary<string, string>(StringComparer.Ordinal);
@@ -300,11 +315,12 @@ public sealed class SearchService(
         }
     }
 
-    private IEnumerable<string> EnumerateRecentNodeFiles(string storageRoot)
+    private IEnumerable<string> EnumerateRecentNodeFiles(string storageRoot, string handoffDirectory)
     {
         foreach (var path in fileSystemService.EnumerateFiles(storageRoot, "*", SearchOption.AllDirectories))
         {
-            if (!IsSearchableArtifact(path) || IsExcludedMemoryPath(storageRoot, path))
+            RepositoryPathGuard.EnsureContainedPath(storageRoot, path);
+            if (!IsSearchableArtifact(path) || NodeService.IsExcludedNodeContent(storageRoot, path, handoffDirectory))
             {
                 continue;
             }
@@ -314,16 +330,6 @@ public sealed class SearchService(
                 yield return path;
             }
         }
-    }
-
-    private static bool IsExcludedMemoryPath(string storageRoot, string path)
-    {
-        var relative = Path.GetRelativePath(storageRoot, path).Replace(Path.DirectorySeparatorChar, '/');
-        return relative.StartsWith("templates/", StringComparison.Ordinal) ||
-            relative.StartsWith("archive/", StringComparison.Ordinal) ||
-            relative.StartsWith("handoffs/", StringComparison.Ordinal) ||
-            relative.StartsWith("indexes/", StringComparison.Ordinal) ||
-            relative.Contains("/artifacts/", StringComparison.Ordinal);
     }
 
     private static async Task<string> ReadArtifactContentAsync(

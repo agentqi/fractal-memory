@@ -17,12 +17,12 @@ public sealed class RetrievalAndSchemaTests
         var searchService = provider.GetRequiredService<ISearchService>();
         var temp = TestEnvironment.CreateTempDirectory();
 
-        await repositoryService.InitializeAsync(temp, CancellationToken.None);
-        await nodeService.CreateNodeAsync(temp, "research/caroline-support", CancellationToken.None);
-        await nodeService.CreateNodeAsync(temp, "research/caroline-activist", CancellationToken.None);
+        await repositoryService.InitializeAsync(temp, TestContext.Current.CancellationToken);
+        await nodeService.CreateNodeAsync(temp, "research/caroline-support", TestContext.Current.CancellationToken);
+        await nodeService.CreateNodeAsync(temp, "research/caroline-activist", TestContext.Current.CancellationToken);
 
         var supportRoot = Path.Combine(temp, ".fractal-memory", "research", "caroline-support");
-        await File.WriteAllTextAsync(Path.Combine(supportRoot, "state.md"), """
+        await TestFile.WriteAllTextAsync(Path.Combine(supportRoot, "state.md"), """
             ---
             title: Caroline Support Group
             summary: Caroline attended the support group.
@@ -36,14 +36,14 @@ public sealed class RetrievalAndSchemaTests
 
             - Caroline attended an LGBTQ support group on 7 May 2023.
             """);
-        await File.WriteAllTextAsync(Path.Combine(supportRoot, "timeline.md"), """
+        await TestFile.WriteAllTextAsync(Path.Combine(supportRoot, "timeline.md"), """
             ---
             title: Timeline
             ---
 
             - 8 May 2023: Caroline said she went to the LGBTQ support group yesterday and found it powerful.
             """);
-        await File.WriteAllTextAsync(Path.Combine(supportRoot, "decisions.md"), """
+        await TestFile.WriteAllTextAsync(Path.Combine(supportRoot, "decisions.md"), """
             ---
             title: Decisions
             ---
@@ -52,7 +52,7 @@ public sealed class RetrievalAndSchemaTests
             """);
 
         var activistRoot = Path.Combine(temp, ".fractal-memory", "research", "caroline-activist");
-        await File.WriteAllTextAsync(Path.Combine(activistRoot, "state.md"), """
+        await TestFile.WriteAllTextAsync(Path.Combine(activistRoot, "state.md"), """
             ---
             title: Caroline Activist Group
             summary: Caroline joined an activist group.
@@ -62,7 +62,7 @@ public sealed class RetrievalAndSchemaTests
             - Caroline is passionate about LGBTQ rights and community support.
             """);
 
-        var results = await searchService.SearchAsync(temp, "When did Caroline go to the LGBTQ support group?", CancellationToken.None);
+        var results = await searchService.SearchAsync(temp, "When did Caroline go to the LGBTQ support group?", TestContext.Current.CancellationToken);
 
         Assert.NotEmpty(results);
         Assert.Equal("research/caroline-support", results[0].RelativePath);
@@ -80,11 +80,11 @@ public sealed class RetrievalAndSchemaTests
         var searchService = provider.GetRequiredService<ISearchService>();
         var temp = TestEnvironment.CreateTempDirectory();
 
-        await repositoryService.InitializeAsync(temp, CancellationToken.None);
-        await nodeService.CreateNodeAsync(temp, "projects/govos", CancellationToken.None);
-        await nodeService.CreateNodeAsync(temp, "projects/flowone", CancellationToken.None);
+        await repositoryService.InitializeAsync(temp, TestContext.Current.CancellationToken);
+        await nodeService.CreateNodeAsync(temp, "projects/govos", TestContext.Current.CancellationToken);
+        await nodeService.CreateNodeAsync(temp, "projects/flowone", TestContext.Current.CancellationToken);
 
-        await File.WriteAllTextAsync(Path.Combine(temp, ".fractal-memory", "projects", "govos", "state.md"), """
+        await TestFile.WriteAllTextAsync(Path.Combine(temp, ".fractal-memory", "projects", "govos", "state.md"), """
             ---
             title: GovOS
             ---
@@ -93,7 +93,7 @@ public sealed class RetrievalAndSchemaTests
 
             Finalize the GovOS authentication direction with organization-scoped tokens.
             """);
-        await File.WriteAllTextAsync(Path.Combine(temp, ".fractal-memory", "projects", "flowone", "state.md"), """
+        await TestFile.WriteAllTextAsync(Path.Combine(temp, ".fractal-memory", "projects", "flowone", "state.md"), """
             ---
             title: FlowOne
             ---
@@ -103,7 +103,7 @@ public sealed class RetrievalAndSchemaTests
             Review authentication direction for FlowOne traceability tooling.
             """);
 
-        var results = await searchService.SearchAsync(temp, "Show only GovOS authentication direction", CancellationToken.None);
+        var results = await searchService.SearchAsync(temp, "Show only GovOS authentication direction", TestContext.Current.CancellationToken);
 
         Assert.NotEmpty(results);
         Assert.Equal("projects/govos", results[0].RelativePath);
@@ -118,10 +118,10 @@ public sealed class RetrievalAndSchemaTests
         var searchService = provider.GetRequiredService<ISearchService>();
         var temp = TestEnvironment.CreateTempDirectory();
 
-        await repositoryService.InitializeAsync(temp, CancellationToken.None);
-        await nodeService.CreateNodeAsync(temp, "projects/snippet", CancellationToken.None);
+        await repositoryService.InitializeAsync(temp, TestContext.Current.CancellationToken);
+        await nodeService.CreateNodeAsync(temp, "projects/snippet", TestContext.Current.CancellationToken);
 
-        await File.WriteAllTextAsync(Path.Combine(temp, ".fractal-memory", "projects", "snippet", "state.md"), """
+        await TestFile.WriteAllTextAsync(Path.Combine(temp, ".fractal-memory", "projects", "snippet", "state.md"), """
             ---
             title: Snippet Demo
             ---
@@ -140,7 +140,7 @@ public sealed class RetrievalAndSchemaTests
             - What evidence should be prioritized first?
             """);
 
-        var results = await searchService.SearchAsync(temp, "220 tokens", CancellationToken.None);
+        var results = await searchService.SearchAsync(temp, "220 tokens", TestContext.Current.CancellationToken);
 
         Assert.NotEmpty(results);
         Assert.Equal("Active Constraints", results[0].SectionHeading);
@@ -159,11 +159,11 @@ public sealed class RetrievalAndSchemaTests
         var exportService = provider.GetRequiredService<IExportService>();
         var temp = TestEnvironment.CreateTempDirectory();
 
-        await repositoryService.InitializeAsync(temp, CancellationToken.None);
-        await nodeService.CreateNodeAsync(temp, "projects/answer-packet", CancellationToken.None);
+        await repositoryService.InitializeAsync(temp, TestContext.Current.CancellationToken);
+        await nodeService.CreateNodeAsync(temp, "projects/answer-packet", TestContext.Current.CancellationToken);
         var nodeRoot = Path.Combine(temp, ".fractal-memory", "projects", "answer-packet");
 
-        await File.WriteAllTextAsync(Path.Combine(nodeRoot, "state.md"), """
+        await TestFile.WriteAllTextAsync(Path.Combine(nodeRoot, "state.md"), """
             ---
             title: Answer Packet State
             last_updated: 2026-04-03T12:00:00Z
@@ -191,7 +191,7 @@ public sealed class RetrievalAndSchemaTests
 
             - Which snippet fields should be mandatory?
             """);
-        await File.WriteAllTextAsync(Path.Combine(nodeRoot, "decisions.md"), """
+        await TestFile.WriteAllTextAsync(Path.Combine(nodeRoot, "decisions.md"), """
             ---
             title: Decisions
             ---
@@ -201,7 +201,7 @@ public sealed class RetrievalAndSchemaTests
             - Prefer snippet-level evidence over whole-file dumps.
             - Keep answer top-k smaller than diagnostics.
             """);
-        await File.WriteAllTextAsync(Path.Combine(nodeRoot, "timeline.md"), """
+        await TestFile.WriteAllTextAsync(Path.Combine(nodeRoot, "timeline.md"), """
             ---
             title: Timeline
             ---
@@ -211,7 +211,7 @@ public sealed class RetrievalAndSchemaTests
             - 2026-04-03: Sprint prioritized reranking, snippets, caching, and schema support.
             """);
 
-        var export = await exportService.ExportAsync(temp, "projects/answer-packet", ExportMode.Standard, CancellationToken.None);
+        var export = await exportService.ExportAsync(temp, "projects/answer-packet", ExportMode.Standard, TestContext.Current.CancellationToken);
 
         Assert.NotNull(export.AnswerContext);
         Assert.Equal("projects/answer-packet", export.AnswerContext!.ProjectBranch);
@@ -229,16 +229,16 @@ public sealed class RetrievalAndSchemaTests
         var indexService = provider.GetRequiredService<IIndexService>();
         var temp = TestEnvironment.CreateTempDirectory();
 
-        await repositoryService.InitializeAsync(temp, CancellationToken.None);
-        await nodeService.CreateNodeAsync(temp, "projects/cache-alpha", CancellationToken.None);
+        await repositoryService.InitializeAsync(temp, TestContext.Current.CancellationToken);
+        await nodeService.CreateNodeAsync(temp, "projects/cache-alpha", TestContext.Current.CancellationToken);
 
-        await indexService.RefreshAsync(temp, CancellationToken.None);
+        await indexService.RefreshAsync(temp, TestContext.Current.CancellationToken);
         var cacheFile = Path.Combine(temp, ".fractal-memory", "indexes", "cache", "nodes", "projects_cache-alpha.json");
         Assert.True(File.Exists(cacheFile));
         var firstWrite = File.GetLastWriteTimeUtc(cacheFile);
 
-        await Task.Delay(1200);
-        await indexService.RefreshAsync(temp, CancellationToken.None);
+        await Task.Delay(1200, TestContext.Current.CancellationToken);
+        await indexService.RefreshAsync(temp, TestContext.Current.CancellationToken);
         var secondWrite = File.GetLastWriteTimeUtc(cacheFile);
 
         Assert.Equal(firstWrite, secondWrite);
@@ -253,21 +253,24 @@ public sealed class RetrievalAndSchemaTests
         var indexService = provider.GetRequiredService<IIndexService>();
         var temp = TestEnvironment.CreateTempDirectory();
 
-        await repositoryService.InitializeAsync(temp, CancellationToken.None);
-        await nodeService.CreateNodeAsync(temp, "projects/cache-beta", CancellationToken.None);
+        await repositoryService.InitializeAsync(temp, TestContext.Current.CancellationToken);
+        await nodeService.CreateNodeAsync(temp, "projects/cache-beta", TestContext.Current.CancellationToken);
 
-        await indexService.RefreshAsync(temp, CancellationToken.None);
+        await indexService.RefreshAsync(temp, TestContext.Current.CancellationToken);
         var cacheFile = Path.Combine(temp, ".fractal-memory", "indexes", "cache", "nodes", "projects_cache-beta.json");
         var manifestPath = Path.Combine(temp, ".fractal-memory", "indexes", "cache", "manifest.json");
         var firstWrite = File.GetLastWriteTimeUtc(cacheFile);
-        var firstManifest = await File.ReadAllTextAsync(manifestPath);
+        var firstManifest = await TestFile.ReadAllTextAsync(manifestPath);
 
-        await Task.Delay(1200);
-        await File.AppendAllTextAsync(Path.Combine(temp, ".fractal-memory", "projects", "cache-beta", "state.md"), Environment.NewLine + "- Cache invalidation marker.");
-        await indexService.RefreshAsync(temp, CancellationToken.None);
+        await Task.Delay(1200, TestContext.Current.CancellationToken);
+        await File.AppendAllTextAsync(
+            Path.Combine(temp, ".fractal-memory", "projects", "cache-beta", "state.md"),
+            Environment.NewLine + "- Cache invalidation marker.",
+            TestContext.Current.CancellationToken);
+        await indexService.RefreshAsync(temp, TestContext.Current.CancellationToken);
 
         var secondWrite = File.GetLastWriteTimeUtc(cacheFile);
-        var secondManifest = await File.ReadAllTextAsync(manifestPath);
+        var secondManifest = await TestFile.ReadAllTextAsync(manifestPath);
 
         Assert.True(secondWrite > firstWrite);
         Assert.NotEqual(firstManifest, secondManifest);
@@ -323,11 +326,11 @@ public sealed class RetrievalAndSchemaTests
         var searchService = provider.GetRequiredService<ISearchService>();
         var temp = TestEnvironment.CreateTempDirectory();
 
-        await repositoryService.InitializeAsync(temp, CancellationToken.None);
+        await repositoryService.InitializeAsync(temp, TestContext.Current.CancellationToken);
         for (var i = 0; i < 15; i++)
         {
-            await nodeService.CreateNodeAsync(temp, $"projects/limit-{i:00}", CancellationToken.None);
-            await File.WriteAllTextAsync(
+            await nodeService.CreateNodeAsync(temp, $"projects/limit-{i:00}", TestContext.Current.CancellationToken);
+            await TestFile.WriteAllTextAsync(
                 Path.Combine(temp, ".fractal-memory", "projects", $"limit-{i:00}", "state.md"),
                 $"""
                 ---
@@ -340,8 +343,8 @@ public sealed class RetrievalAndSchemaTests
                 """);
         }
 
-        var defaultResults = await searchService.SearchAsync(temp, "retrieval limit propagation", CancellationToken.None);
-        var expandedResults = await searchService.SearchAsync(temp, "retrieval limit propagation", CancellationToken.None, limit: 15);
+        var defaultResults = await searchService.SearchAsync(temp, "retrieval limit propagation", TestContext.Current.CancellationToken);
+        var expandedResults = await searchService.SearchAsync(temp, "retrieval limit propagation", TestContext.Current.CancellationToken, limit: 15);
 
         Assert.True(defaultResults.Count <= 10);
         Assert.True(expandedResults.Count > defaultResults.Count);
@@ -356,11 +359,11 @@ public sealed class RetrievalAndSchemaTests
         var searchService = provider.GetRequiredService<ISearchService>();
         var temp = TestEnvironment.CreateTempDirectory();
 
-        await repositoryService.InitializeAsync(temp, CancellationToken.None);
-        await nodeService.CreateNodeAsync(temp, "projects/exact-phrase", CancellationToken.None);
-        await nodeService.CreateNodeAsync(temp, "projects/topic-only", CancellationToken.None);
+        await repositoryService.InitializeAsync(temp, TestContext.Current.CancellationToken);
+        await nodeService.CreateNodeAsync(temp, "projects/exact-phrase", TestContext.Current.CancellationToken);
+        await nodeService.CreateNodeAsync(temp, "projects/topic-only", TestContext.Current.CancellationToken);
 
-        await File.WriteAllTextAsync(Path.Combine(temp, ".fractal-memory", "projects", "exact-phrase", "state.md"), """
+        await TestFile.WriteAllTextAsync(Path.Combine(temp, ".fractal-memory", "projects", "exact-phrase", "state.md"), """
             ---
             title: Exact Phrase
             ---
@@ -369,7 +372,7 @@ public sealed class RetrievalAndSchemaTests
 
             Document the deployment rollback procedure for the staging tier.
             """);
-        await File.WriteAllTextAsync(Path.Combine(temp, ".fractal-memory", "projects", "topic-only", "state.md"), """
+        await TestFile.WriteAllTextAsync(Path.Combine(temp, ".fractal-memory", "projects", "topic-only", "state.md"), """
             ---
             title: Topic Only
             ---
@@ -379,7 +382,7 @@ public sealed class RetrievalAndSchemaTests
             Track tier deployment metrics and rollback failure rates separately.
             """);
 
-        var results = await searchService.SearchAsync(temp, "deployment rollback procedure", CancellationToken.None);
+        var results = await searchService.SearchAsync(temp, "deployment rollback procedure", TestContext.Current.CancellationToken);
 
         Assert.NotEmpty(results);
         Assert.Equal("projects/exact-phrase", results[0].RelativePath);
@@ -395,10 +398,10 @@ public sealed class RetrievalAndSchemaTests
         var searchService = provider.GetRequiredService<ISearchService>();
         var temp = TestEnvironment.CreateTempDirectory();
 
-        await repositoryService.InitializeAsync(temp, CancellationToken.None);
-        await nodeService.CreateNodeAsync(temp, "projects/cache-invalidation", CancellationToken.None);
+        await repositoryService.InitializeAsync(temp, TestContext.Current.CancellationToken);
+        await nodeService.CreateNodeAsync(temp, "projects/cache-invalidation", TestContext.Current.CancellationToken);
         var statePath = Path.Combine(temp, ".fractal-memory", "projects", "cache-invalidation", "state.md");
-        await File.WriteAllTextAsync(statePath, """
+        await TestFile.WriteAllTextAsync(statePath, """
             ---
             title: Cache Invalidation
             ---
@@ -406,11 +409,11 @@ public sealed class RetrievalAndSchemaTests
             Initial waypoint marker before the update happens.
             """);
 
-        var beforeUpdate = await searchService.SearchAsync(temp, "initial waypoint marker", CancellationToken.None);
+        var beforeUpdate = await searchService.SearchAsync(temp, "initial waypoint marker", TestContext.Current.CancellationToken);
         Assert.NotEmpty(beforeUpdate);
 
-        await Task.Delay(1100);
-        await File.WriteAllTextAsync(statePath, """
+        await Task.Delay(1100, TestContext.Current.CancellationToken);
+        await TestFile.WriteAllTextAsync(statePath, """
             ---
             title: Cache Invalidation
             ---
@@ -418,8 +421,8 @@ public sealed class RetrievalAndSchemaTests
             Subsequent breadcrumb signal after the cache should have flushed.
             """);
 
-        var afterStaleQuery = await searchService.SearchAsync(temp, "initial waypoint marker", CancellationToken.None);
-        var afterFreshQuery = await searchService.SearchAsync(temp, "subsequent breadcrumb signal", CancellationToken.None);
+        var afterStaleQuery = await searchService.SearchAsync(temp, "initial waypoint marker", TestContext.Current.CancellationToken);
+        var afterFreshQuery = await searchService.SearchAsync(temp, "subsequent breadcrumb signal", TestContext.Current.CancellationToken);
 
         Assert.Empty(afterStaleQuery);
         Assert.NotEmpty(afterFreshQuery);
@@ -434,12 +437,12 @@ public sealed class RetrievalAndSchemaTests
         var searchService = provider.GetRequiredService<ISearchService>();
         var temp = TestEnvironment.CreateTempDirectory();
 
-        await repositoryService.InitializeAsync(temp, CancellationToken.None);
-        await nodeService.CreateNodeAsync(temp, "projects/alpha", CancellationToken.None);
-        await nodeService.CreateNodeAsync(temp, "projects-archive/beta", CancellationToken.None);
+        await repositoryService.InitializeAsync(temp, TestContext.Current.CancellationToken);
+        await nodeService.CreateNodeAsync(temp, "projects/alpha", TestContext.Current.CancellationToken);
+        await nodeService.CreateNodeAsync(temp, "projects-archive/beta", TestContext.Current.CancellationToken);
 
-        var scoped = await searchService.GetRecentAsync(temp, 50, 30, "projects", CancellationToken.None);
-        var withSlash = await searchService.GetRecentAsync(temp, 50, 30, "projects/", CancellationToken.None);
+        var scoped = await searchService.GetRecentAsync(temp, 50, 30, "projects", TestContext.Current.CancellationToken);
+        var withSlash = await searchService.GetRecentAsync(temp, 50, 30, "projects/", TestContext.Current.CancellationToken);
 
         Assert.All(scoped, item => Assert.StartsWith("projects/", item.RelativePath, StringComparison.Ordinal));
         Assert.All(withSlash, item => Assert.StartsWith("projects/", item.RelativePath, StringComparison.Ordinal));
@@ -455,9 +458,9 @@ public sealed class RetrievalAndSchemaTests
         var searchService = provider.GetRequiredService<ISearchService>();
         var temp = TestEnvironment.CreateTempDirectory();
 
-        await repositoryService.InitializeAsync(temp, CancellationToken.None);
-        await nodeService.CreateNodeAsync(temp, "research/release", CancellationToken.None);
-        await File.WriteAllTextAsync(Path.Combine(temp, ".fractal-memory", "research", "release", "state.md"), """
+        await repositoryService.InitializeAsync(temp, TestContext.Current.CancellationToken);
+        await nodeService.CreateNodeAsync(temp, "research/release", TestContext.Current.CancellationToken);
+        await TestFile.WriteAllTextAsync(Path.Combine(temp, ".fractal-memory", "research", "release", "state.md"), """
             ---
             title: Release Window
             ---
@@ -472,7 +475,7 @@ public sealed class RetrievalAndSchemaTests
             - Earlier milestones did not include the audit log.
             """);
 
-        var results = await searchService.SearchAsync(temp, "latest release rollout milestone", CancellationToken.None);
+        var results = await searchService.SearchAsync(temp, "latest release rollout milestone", TestContext.Current.CancellationToken);
 
         Assert.NotEmpty(results);
         Assert.Contains(results[0].ScoreBreakdown.Keys, key =>
@@ -488,10 +491,10 @@ public sealed class RetrievalAndSchemaTests
         var searchService = provider.GetRequiredService<ISearchService>();
         var temp = TestEnvironment.CreateTempDirectory();
 
-        await repositoryService.InitializeAsync(temp, CancellationToken.None);
-        await nodeService.CreateNodeAsync(temp, "projects/in-scope", CancellationToken.None);
-        await nodeService.CreateNodeAsync(temp, "research/out-of-scope", CancellationToken.None);
-        await File.WriteAllTextAsync(Path.Combine(temp, ".fractal-memory", "projects", "in-scope", "state.md"), """
+        await repositoryService.InitializeAsync(temp, TestContext.Current.CancellationToken);
+        await nodeService.CreateNodeAsync(temp, "projects/in-scope", TestContext.Current.CancellationToken);
+        await nodeService.CreateNodeAsync(temp, "research/out-of-scope", TestContext.Current.CancellationToken);
+        await TestFile.WriteAllTextAsync(Path.Combine(temp, ".fractal-memory", "projects", "in-scope", "state.md"), """
             ---
             title: In Scope
             ---
@@ -500,7 +503,7 @@ public sealed class RetrievalAndSchemaTests
 
             Find the deployment automation guardrail document.
             """);
-        await File.WriteAllTextAsync(Path.Combine(temp, ".fractal-memory", "research", "out-of-scope", "state.md"), """
+        await TestFile.WriteAllTextAsync(Path.Combine(temp, ".fractal-memory", "research", "out-of-scope", "state.md"), """
             ---
             title: Out Of Scope
             ---
@@ -510,8 +513,8 @@ public sealed class RetrievalAndSchemaTests
             Investigate the same deployment automation guardrail topic.
             """);
 
-        var scoped = await searchService.SearchAsync(temp, "deployment automation guardrail", CancellationToken.None, scope: "projects/");
-        var unscoped = await searchService.SearchAsync(temp, "deployment automation guardrail", CancellationToken.None);
+        var scoped = await searchService.SearchAsync(temp, "deployment automation guardrail", TestContext.Current.CancellationToken, scope: "projects/");
+        var unscoped = await searchService.SearchAsync(temp, "deployment automation guardrail", TestContext.Current.CancellationToken);
 
         Assert.All(scoped, item => Assert.StartsWith("projects/", item.RelativePath, StringComparison.Ordinal));
         Assert.True(unscoped.Count > scoped.Count);
@@ -526,19 +529,19 @@ public sealed class RetrievalAndSchemaTests
         var searchService = provider.GetRequiredService<ISearchService>();
         var temp = TestEnvironment.CreateTempDirectory();
 
-        await repositoryService.InitializeAsync(temp, CancellationToken.None);
-        await nodeService.CreateNodeAsync(temp, "projects/tie-break", CancellationToken.None);
+        await repositoryService.InitializeAsync(temp, TestContext.Current.CancellationToken);
+        await nodeService.CreateNodeAsync(temp, "projects/tie-break", TestContext.Current.CancellationToken);
         var nodeRoot = Path.Combine(temp, ".fractal-memory", "projects", "tie-break");
 
         const string sharedSnippet = "## Notes\n\nCanonical phrase tie break marker line for the test.\n";
-        await File.WriteAllTextAsync(Path.Combine(nodeRoot, "state.md"), $"""
+        await TestFile.WriteAllTextAsync(Path.Combine(nodeRoot, "state.md"), $"""
             ---
             title: Tie Break State
             ---
 
             {sharedSnippet}
             """);
-        await File.WriteAllTextAsync(Path.Combine(nodeRoot, "decisions.md"), $"""
+        await TestFile.WriteAllTextAsync(Path.Combine(nodeRoot, "decisions.md"), $"""
             ---
             title: Tie Break Decisions
             ---
@@ -546,7 +549,7 @@ public sealed class RetrievalAndSchemaTests
             {sharedSnippet}
             """);
 
-        var results = await searchService.SearchAsync(temp, "canonical phrase tie break marker", CancellationToken.None);
+        var results = await searchService.SearchAsync(temp, "canonical phrase tie break marker", TestContext.Current.CancellationToken);
 
         Assert.NotEmpty(results);
         Assert.Equal("state.md", results[0].MatchedFile);
@@ -561,9 +564,9 @@ public sealed class RetrievalAndSchemaTests
         var searchService = provider.GetRequiredService<ISearchService>();
         var temp = TestEnvironment.CreateTempDirectory();
 
-        await repositoryService.InitializeAsync(temp, CancellationToken.None);
-        await nodeService.CreateNodeAsync(temp, "research/numeric-date", CancellationToken.None);
-        await File.WriteAllTextAsync(Path.Combine(temp, ".fractal-memory", "research", "numeric-date", "state.md"), """
+        await repositoryService.InitializeAsync(temp, TestContext.Current.CancellationToken);
+        await nodeService.CreateNodeAsync(temp, "research/numeric-date", TestContext.Current.CancellationToken);
+        await TestFile.WriteAllTextAsync(Path.Combine(temp, ".fractal-memory", "research", "numeric-date", "state.md"), """
             ---
             title: Numeric Date
             ---
@@ -577,7 +580,7 @@ public sealed class RetrievalAndSchemaTests
             - The rollout milestone shipped on 2026/04/12.
             """);
 
-        var results = await searchService.SearchAsync(temp, "when did the rollout milestone ship", CancellationToken.None);
+        var results = await searchService.SearchAsync(temp, "when did the rollout milestone ship", TestContext.Current.CancellationToken);
 
         Assert.NotEmpty(results);
         Assert.Contains(results[0].ScoreBreakdown.Keys, key =>
@@ -595,14 +598,14 @@ public sealed class RetrievalAndSchemaTests
             var nodeService = primingProvider.GetRequiredService<INodeService>();
             var indexService = primingProvider.GetRequiredService<IIndexService>();
 
-            await repositoryService.InitializeAsync(workingDirectory, CancellationToken.None);
-            await nodeService.CreateNodeAsync(workingDirectory, "projects/cold-start", CancellationToken.None);
-            await indexService.RefreshAsync(workingDirectory, CancellationToken.None);
+            await repositoryService.InitializeAsync(workingDirectory, TestContext.Current.CancellationToken);
+            await nodeService.CreateNodeAsync(workingDirectory, "projects/cold-start", TestContext.Current.CancellationToken);
+            await indexService.RefreshAsync(workingDirectory, TestContext.Current.CancellationToken);
         }
 
         using var coldProvider = TestEnvironment.CreateServices();
         var coldSearchService = coldProvider.GetRequiredService<ISearchService>();
-        var coldResults = await coldSearchService.SearchAsync(workingDirectory, "projects/cold-start", CancellationToken.None);
+        var coldResults = await coldSearchService.SearchAsync(workingDirectory, "projects/cold-start", TestContext.Current.CancellationToken);
 
         Assert.NotEmpty(coldResults);
         Assert.Equal("projects/cold-start", coldResults[0].RelativePath);
@@ -635,16 +638,16 @@ public sealed class RetrievalAndSchemaTests
         var searchService = provider.GetRequiredService<ISearchService>();
         var temp = TestEnvironment.CreateTempDirectory();
 
-        await repositoryService.InitializeAsync(temp, CancellationToken.None);
-        await nodeService.CreateNodeAsync(temp, "projects/keeper", CancellationToken.None);
-        await nodeService.CreateNodeAsync(temp, "projects/deletable", CancellationToken.None);
+        await repositoryService.InitializeAsync(temp, TestContext.Current.CancellationToken);
+        await nodeService.CreateNodeAsync(temp, "projects/keeper", TestContext.Current.CancellationToken);
+        await nodeService.CreateNodeAsync(temp, "projects/deletable", TestContext.Current.CancellationToken);
 
-        var before = await searchService.SearchAsync(temp, "projects/deletable", CancellationToken.None);
+        var before = await searchService.SearchAsync(temp, "projects/deletable", TestContext.Current.CancellationToken);
         Assert.Contains(before, item => item.RelativePath == "projects/deletable");
 
         Directory.Delete(Path.Combine(temp, ".fractal-memory", "projects", "deletable"), recursive: true);
 
-        var after = await searchService.SearchAsync(temp, "projects/deletable", CancellationToken.None);
+        var after = await searchService.SearchAsync(temp, "projects/deletable", TestContext.Current.CancellationToken);
         Assert.DoesNotContain(after, item => item.RelativePath == "projects/deletable");
     }
 
@@ -657,11 +660,11 @@ public sealed class RetrievalAndSchemaTests
         var searchService = provider.GetRequiredService<ISearchService>();
         var temp = TestEnvironment.CreateTempDirectory();
 
-        await repositoryService.InitializeAsync(temp, CancellationToken.None);
-        await nodeService.CreateNodeAsync(temp, "projects/win-sep", CancellationToken.None);
-        await nodeService.CreateNodeAsync(temp, "research/win-sep", CancellationToken.None);
+        await repositoryService.InitializeAsync(temp, TestContext.Current.CancellationToken);
+        await nodeService.CreateNodeAsync(temp, "projects/win-sep", TestContext.Current.CancellationToken);
+        await nodeService.CreateNodeAsync(temp, "research/win-sep", TestContext.Current.CancellationToken);
 
-        await File.WriteAllTextAsync(Path.Combine(temp, ".fractal-memory", "projects", "win-sep", "state.md"), """
+        await TestFile.WriteAllTextAsync(Path.Combine(temp, ".fractal-memory", "projects", "win-sep", "state.md"), """
             ---
             title: Win Sep Projects
             ---
@@ -670,7 +673,7 @@ public sealed class RetrievalAndSchemaTests
 
             Windows separator scope target line.
             """);
-        await File.WriteAllTextAsync(Path.Combine(temp, ".fractal-memory", "research", "win-sep", "state.md"), """
+        await TestFile.WriteAllTextAsync(Path.Combine(temp, ".fractal-memory", "research", "win-sep", "state.md"), """
             ---
             title: Win Sep Research
             ---
@@ -680,7 +683,7 @@ public sealed class RetrievalAndSchemaTests
             Windows separator scope target line.
             """);
 
-        var results = await searchService.SearchAsync(temp, "windows separator scope target", CancellationToken.None, scope: "projects\\");
+        var results = await searchService.SearchAsync(temp, "windows separator scope target", TestContext.Current.CancellationToken, scope: "projects\\");
 
         Assert.NotEmpty(results);
         Assert.All(results, item => Assert.StartsWith("projects/", item.RelativePath, StringComparison.Ordinal));
@@ -696,11 +699,11 @@ public sealed class RetrievalAndSchemaTests
         var validationService = provider.GetRequiredService<IValidationService>();
         var temp = TestEnvironment.CreateTempDirectory();
 
-        await repositoryService.InitializeAsync(temp, CancellationToken.None);
-        await nodeService.CreateNodeAsync(temp, "projects/index-only", CancellationToken.None);
+        await repositoryService.InitializeAsync(temp, TestContext.Current.CancellationToken);
+        await nodeService.CreateNodeAsync(temp, "projects/index-only", TestContext.Current.CancellationToken);
         var nodeRoot = Path.Combine(temp, ".fractal-memory", "projects", "index-only");
         File.Delete(Path.Combine(nodeRoot, "state.md"));
-        await File.WriteAllTextAsync(Path.Combine(nodeRoot, "index.md"), """
+        await TestFile.WriteAllTextAsync(Path.Combine(nodeRoot, "index.md"), """
             ---
             title: Index Only Node
             summary: Search-visible node without state.
@@ -711,8 +714,8 @@ public sealed class RetrievalAndSchemaTests
             Index-only visibility regression marker.
             """);
 
-        var results = await searchService.SearchAsync(temp, "index-only visibility regression marker", CancellationToken.None);
-        var validation = await validationService.ValidateAsync(temp, CancellationToken.None);
+        var results = await searchService.SearchAsync(temp, "index-only visibility regression marker", TestContext.Current.CancellationToken);
+        var validation = await validationService.ValidateAsync(temp, TestContext.Current.CancellationToken);
 
         Assert.Contains(results, item => item.RelativePath == "projects/index-only");
         Assert.Contains(validation.Issues, issue =>
@@ -749,19 +752,19 @@ public sealed class RetrievalAndSchemaTests
             var nodeService = primingProvider.GetRequiredService<INodeService>();
             var indexService = primingProvider.GetRequiredService<IIndexService>();
 
-            await repositoryService.InitializeAsync(workingDirectory, CancellationToken.None);
-            await nodeService.CreateNodeAsync(workingDirectory, "projects/traversal", CancellationToken.None);
-            await indexService.RefreshAsync(workingDirectory, CancellationToken.None);
+            await repositoryService.InitializeAsync(workingDirectory, TestContext.Current.CancellationToken);
+            await nodeService.CreateNodeAsync(workingDirectory, "projects/traversal", TestContext.Current.CancellationToken);
+            await indexService.RefreshAsync(workingDirectory, TestContext.Current.CancellationToken);
         }
 
         var manifestPath = Path.Combine(workingDirectory, ".fractal-memory", "indexes", "cache", "manifest.json");
-        var manifestText = await File.ReadAllTextAsync(manifestPath);
+        var manifestText = await TestFile.ReadAllTextAsync(manifestPath);
         var tampered = manifestText.Replace("projects_traversal.json", "../../../etc/passwd");
-        await File.WriteAllTextAsync(manifestPath, tampered);
+        await TestFile.WriteAllTextAsync(manifestPath, tampered);
 
         using var coldProvider = TestEnvironment.CreateServices();
         var coldSearchService = coldProvider.GetRequiredService<ISearchService>();
-        var results = await coldSearchService.SearchAsync(workingDirectory, "projects/traversal", CancellationToken.None);
+        var results = await coldSearchService.SearchAsync(workingDirectory, "projects/traversal", TestContext.Current.CancellationToken);
 
         Assert.NotEmpty(results);
         Assert.Contains(results, item => item.RelativePath == "projects/traversal");
@@ -776,12 +779,12 @@ public sealed class RetrievalAndSchemaTests
         var indexService = provider.GetRequiredService<IIndexService>();
         var temp = TestEnvironment.CreateTempDirectory();
 
-        await repositoryService.InitializeAsync(temp, CancellationToken.None);
-        await nodeService.CreateNodeAsync(temp, "projects/inspectable-cache", CancellationToken.None);
-        await indexService.RefreshAsync(temp, CancellationToken.None);
+        await repositoryService.InitializeAsync(temp, TestContext.Current.CancellationToken);
+        await nodeService.CreateNodeAsync(temp, "projects/inspectable-cache", TestContext.Current.CancellationToken);
+        await indexService.RefreshAsync(temp, TestContext.Current.CancellationToken);
 
         var manifestPath = Path.Combine(temp, ".fractal-memory", "indexes", "cache", "manifest.json");
-        using var document = JsonDocument.Parse(await File.ReadAllTextAsync(manifestPath));
+        using var document = JsonDocument.Parse(await TestFile.ReadAllTextAsync(manifestPath));
         var root = document.RootElement;
 
         Assert.True(root.TryGetProperty("Nodes", out var nodes));

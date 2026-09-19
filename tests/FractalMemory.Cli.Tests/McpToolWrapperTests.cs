@@ -44,7 +44,7 @@ public sealed class McpToolWrapperTests
             new StubValidationService(),
             context);
 
-        var response = await tools.MemorySearch("alpha", limit: 1, scope: "projects/", cancellationToken: CancellationToken.None);
+        var response = await tools.MemorySearch("alpha", limit: 1, scope: "projects/", cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal("/repo-root", searchService.LastWorkingDirectory);
         Assert.Equal(1, searchService.LastLimit);
@@ -78,13 +78,13 @@ public sealed class McpToolWrapperTests
 
     private sealed class StubReadService : IReadService
     {
-        public Task<OpenNodeResult> OpenAsync(string workingDirectory, string nodePath, RetrievalDepth depth, NodeViewType view, CancellationToken cancellationToken) =>
+        public Task<OpenNodeResult> OpenAsync(string workingDirectory, string nodePath, RetrievalDepth? depth, NodeViewType view, CancellationToken cancellationToken) =>
             throw new NotSupportedException();
     }
 
     private sealed class StubExportService : IExportService
     {
-        public Task<ExportDocument> ExportAsync(string workingDirectory, string nodePath, ExportMode mode, CancellationToken cancellationToken) =>
+        public Task<ExportDocument> ExportAsync(string workingDirectory, string nodePath, ExportMode? mode, CancellationToken cancellationToken) =>
             throw new NotSupportedException();
     }
 
@@ -112,5 +112,18 @@ public sealed class McpToolWrapperTests
         public string GetServiceWorkingDirectory() => workingDirectory;
         public string GetStoragePath(string relativePath) => throw new NotSupportedException();
         public string GetNodeFilePath(string encodedNodePath, string fileName) => throw new NotSupportedException();
+    }
+
+    private sealed class StubRepositoryService : IRepositoryService
+    {
+        public Task<string> InitializeAsync(string workingDirectory, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public string? FindRepositoryRoot(string startDirectory) => startDirectory;
+
+        public Task<RepositoryConfig> LoadConfigAsync(string repositoryRoot, CancellationToken cancellationToken) =>
+            Task.FromResult(new RepositoryConfig());
+
+        public string GetStorageRoot(string repositoryRoot) => Path.Combine(repositoryRoot, ".fractal-memory");
     }
 }

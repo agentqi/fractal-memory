@@ -62,7 +62,7 @@ dotnet build FractalMemory.sln
 Run all tests:
 
 ```bash
-dotnet test FractalMemory.sln
+dotnet test --solution FractalMemory.sln
 ```
 
 ## Run The CLI
@@ -70,13 +70,13 @@ dotnet test FractalMemory.sln
 Run from source:
 
 ```bash
-dotnet run --project /Users/telli/Desktop/fm\ cli/src/FractalMemory.Cli -- init
+dotnet run --project src/FractalMemory.Cli -- init
 ```
 
 Build the binary and run `fm` directly:
 
 ```bash
-dotnet build /Users/telli/Desktop/fm\ cli/src/FractalMemory.Cli
+dotnet build src/FractalMemory.Cli
 ./src/FractalMemory.Cli/bin/Debug/net10.0/fm init
 ```
 
@@ -118,7 +118,7 @@ fractalmem-mcp
 
 The MCP server resolves the repository from its current working directory, or from `FRACTALMEM_REPOSITORY_ROOT` when an agent client launches it from another directory.
 
-Plugin skeletons live under:
+Installable plugin sources live under:
 
 - `plugins/codex-fractalmem/`
 - `plugins/claude-fractalmem/`
@@ -128,7 +128,7 @@ Marketplace metadata lives under:
 - `.agents/plugins/marketplace.json`
 - `.claude-plugin/marketplace.json`
 
-See `docs/plugins.md` for plugin packaging notes.
+See `docs/plugins.md` for plugin packaging and local installation notes.
 
 ## Repository Layout
 
@@ -177,14 +177,23 @@ Each created node contains:
 ## CLI Behavior Summary
 
 - `init` creates the repository, config, templates, root files, and index stubs.
-- `node create` normalizes and validates the path, creates the standard node contract as markdown or HTML, and refreshes indexes when indexing is enabled.
+- `node create` normalizes and validates the path, creates the standard node contract as markdown or HTML, and refreshes indexes when both indexing and `refresh_on_write` are enabled.
 - `open` supports layered retrieval with depth `0..3` and optional focused views.
 - `search` ranks exact path, title, alias, tag, then markdown content matches, with optional path scoping.
 - `export` emits AI-friendly structured output with stable source labels.
-- `handoff create` writes resumable handoff markdown into `.fractal-memory/handoffs/`.
+- `handoff create` writes resumable handoff markdown into the configured handoff directory (by default `.fractal-memory/handoffs/`).
 - `recent` surfaces recently modified nodes for work resumption.
 - `index refresh` rebuilds aliases, tags, and paths from filesystem truth.
 - `validate` reports hard errors and warnings for structure, metadata, and stale indexes.
+
+### Retrieval and recovery
+
+- `open --view state` and depth `3` include the complete state document. Depth `2` selects populated working sections and marks an abridged state explicitly (`stateTruncated` in MCP results).
+- Markdown search and export citations use original file line numbers, including front matter. HTML retains headings and lists for structured retrieval; HTML citations include paths and section headings without generated line numbers.
+- Scoped searches load only the requested branch, so malformed content in another branch does not block them.
+- Node creation validates configuration and stages a complete, parsed node before publishing it. Failed writes clean up their staging directory; validation reports incomplete scaffolds left by older versions.
+- `index refresh` reads source documents, includes front matter in cache invalidation, and repairs damaged caches. Older cache formats are ignored on reads and upgraded on the next refresh. Unchanged valid cache files retain their modification times.
+- Undefined numeric depth, view, format, and export-mode values are rejected.
 
 ## Run The Optional MCP Server
 
@@ -193,7 +202,7 @@ The MCP server is optional. The CLI does not depend on it.
 Run the stdio MCP server:
 
 ```bash
-dotnet run --project /Users/telli/Desktop/fm\ cli/src/FractalMemory.McpServer
+dotnet run --project src/FractalMemory.McpServer
 ```
 
 By default, the server resolves repositories from its current working directory by walking upward for `.fractal-memory/config.yaml`, just like the CLI.
@@ -202,8 +211,21 @@ If the MCP host launches the server outside the repository, set `FRACTALMEM_REPO
 
 ```bash
 FRACTALMEM_REPOSITORY_ROOT=/absolute/path/to/workspace \
-dotnet run --project /Users/telli/Desktop/fm\ cli/src/FractalMemory.McpServer
+dotnet run --project src/FractalMemory.McpServer
 ```
+
+## Configuration
+
+`.fractal-memory/config.yaml` controls retrieval, indexing, metadata, handoffs, and validation:
+
+- `default_depth` is used by CLI and MCP `open` calls when no depth is supplied.
+- `default_export_mode` is used by CLI and MCP exports when no mode is supplied.
+- `indexing.enabled` enables indexes; `indexing.refresh_on_write` controls automatic refresh after node creation.
+- `metadata.front_matter` controls whether new Markdown nodes include YAML front matter.
+- `handoffs.directory` selects a relative directory inside `.fractal-memory/`.
+- retrieval limits must be positive integers.
+
+Configured storage directories cannot be absolute or contain `.` or `..` traversal. Symbolic links and reparse points inside `.fractal-memory/` are rejected so CLI and MCP operations cannot escape the repository boundary.
 
 ## MCP Surface
 
@@ -248,3 +270,4 @@ Typical agent workflow:
 - The implementation is built for standard .NET 10 JIT execution first, while keeping the architecture relatively AOT-friendly.
 - There is no database, network storage, telemetry, GUI, or cloud dependency in the core MVP.
 - Benchmarking lives separately at https://github.com/agentqi/fractal-memory-bench.
+- Release and branch-protection setup is documented in `docs/releasing.md`.

@@ -46,12 +46,12 @@ public sealed class ParsingAndValidationTests
         var validationService = provider.GetRequiredService<IValidationService>();
         var temp = TestEnvironment.CreateTempDirectory();
 
-        await repositoryService.InitializeAsync(temp, CancellationToken.None);
+        await repositoryService.InitializeAsync(temp, TestContext.Current.CancellationToken);
         var brokenNode = Path.Combine(temp, ".fractal-memory", "projects", "invalid node");
         Directory.CreateDirectory(brokenNode);
-        await File.WriteAllTextAsync(Path.Combine(brokenNode, "index.md"), "---\ninvalid: [\n---\n");
+        await TestFile.WriteAllTextAsync(Path.Combine(brokenNode, "index.md"), "---\ninvalid: [\n---\n");
 
-        var report = await validationService.ValidateAsync(temp, CancellationToken.None);
+        var report = await validationService.ValidateAsync(temp, TestContext.Current.CancellationToken);
 
         Assert.Contains(report.Issues, issue => issue.Severity == ValidationSeverity.Error);
         Assert.Contains(report.Issues, issue => issue.Message.Contains("Indexes may be stale", StringComparison.Ordinal));

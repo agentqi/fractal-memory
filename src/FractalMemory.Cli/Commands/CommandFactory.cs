@@ -44,7 +44,7 @@ public static class CommandFactory
 
         var open = new Command("open", "Open a node.");
         var openPathArgument = new Argument<string>("path");
-        var depthOption = new Option<RetrievalDepth>("--depth") { DefaultValueFactory = _ => RetrievalDepth.Orientation };
+        var depthOption = new Option<RetrievalDepth?>("--depth");
         var viewOption = new Option<NodeViewType>("--view") { DefaultValueFactory = _ => NodeViewType.Index };
         open.Arguments.Add(openPathArgument);
         open.Options.Add(depthOption);
@@ -83,7 +83,7 @@ public static class CommandFactory
 
         var export = new Command("export", "Export a node as AI-friendly text.");
         var exportPathArgument = new Argument<string>("path");
-        var modeOption = new Option<ExportMode>("--mode") { DefaultValueFactory = _ => ExportMode.Compact };
+        var modeOption = new Option<ExportMode?>("--mode");
         export.Arguments.Add(exportPathArgument);
         export.Options.Add(modeOption);
         export.SetAction((parseResult, cancellationToken) => ExecuteAsync(async () =>
@@ -204,5 +204,6 @@ public static class CommandFactory
                 return CliExitCodes.UserError;
             }
         }
+
     }
 }

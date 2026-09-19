@@ -20,7 +20,8 @@ public interface INodeService
         CancellationToken cancellationToken,
         NodeFileFormat format = NodeFileFormat.Markdown);
     Task<MemoryNode> GetNodeAsync(string workingDirectory, string nodePath, CancellationToken cancellationToken);
-    Task<IReadOnlyList<MemoryNode>> GetAllNodesAsync(string repositoryRoot, CancellationToken cancellationToken);
+    Task<IReadOnlyList<MemoryNode>> GetAllNodesAsync(
+        string repositoryRoot, CancellationToken cancellationToken, bool bypassCache = false, string? scope = null);
     Task<IReadOnlyList<MemoryNode>> GetChildNodesAsync(string repositoryRoot, MemoryNode node, CancellationToken cancellationToken);
 }
 
@@ -29,7 +30,7 @@ public interface IReadService
     Task<OpenNodeResult> OpenAsync(
         string workingDirectory,
         string nodePath,
-        RetrievalDepth depth,
+        RetrievalDepth? depth,
         NodeViewType view,
         CancellationToken cancellationToken);
 }
@@ -50,7 +51,7 @@ public interface IExportService
     Task<ExportDocument> ExportAsync(
         string workingDirectory,
         string nodePath,
-        ExportMode mode,
+        ExportMode? mode,
         CancellationToken cancellationToken);
 }
 
@@ -84,6 +85,8 @@ public interface IFileSystemService
     bool DirectoryExists(string path);
     bool FileExists(string path);
     void CreateDirectory(string path);
+    void MoveDirectory(string sourcePath, string destinationPath);
+    void DeleteDirectory(string path);
     Task WriteAllTextAsync(string path, string content, CancellationToken cancellationToken);
     Task<string> ReadAllTextAsync(string path, CancellationToken cancellationToken);
     IEnumerable<string> EnumerateDirectories(string path);
@@ -111,6 +114,7 @@ public interface ITemplateService
         string repositoryRoot,
         string nodeName,
         NodeFileFormat format,
+        bool includeFrontMatter,
         CancellationToken cancellationToken);
 }
 
