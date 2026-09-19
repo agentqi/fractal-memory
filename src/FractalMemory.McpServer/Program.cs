@@ -20,7 +20,9 @@ builder.Services
     .AddMcpServer()
     .WithStdioServerTransport()
     .WithTools<MemoryTools>()
+    .WithTools<MemoryWorkflowTools>()
     .WithResources<MemoryResources>()
+    .WithResources<MemoryDocumentResources>()
     .WithPrompts<MemoryPrompts>();
 
 var app = builder.Build();

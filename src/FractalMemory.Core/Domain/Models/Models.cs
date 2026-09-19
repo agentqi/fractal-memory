@@ -68,6 +68,7 @@ public sealed class NodeMetadata
     public NodeStatus Status { get; init; } = NodeStatus.Active;
     public PriorityLevel Priority { get; init; } = PriorityLevel.Medium;
     public DateTimeOffset? LastUpdated { get; init; }
+    public DateTimeOffset? ReviewAfter { get; init; }
     public string? Owner { get; init; }
     public string? Summary { get; init; }
 }

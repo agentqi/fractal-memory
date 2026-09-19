@@ -12,9 +12,9 @@ public sealed class RetrievalRegressionTests
     {
         using var repository = await RegressionRepository.CreateAsync();
         await repository.CreateNodeAsync();
-        await repository.ReplaceAsync("projects/test/state.md", "Capture what is currently true, active, and important.", "Launch the release safely.");
-        await repository.ReplaceAsync("projects/test/state.md", "- Add constraints, guardrails, or decisions in force.", "- Never overwrite the production database.");
-        await repository.ReplaceAsync("projects/test/state.md", "- Add the next best actions.", "- Run the canary rollout.");
+        await repository.ReplaceAsync("projects/test/state.md", "<!-- fractalmem-placeholder: Capture what is currently true, active, and important. -->", "Launch the release safely.");
+        await repository.ReplaceAsync("projects/test/state.md", "<!-- fractalmem-placeholder: Add constraints, guardrails, or decisions in force. -->", "- Never overwrite the production database.");
+        await repository.ReplaceAsync("projects/test/state.md", "<!-- fractalmem-placeholder: Add the next best actions. -->", "- Run the canary rollout.");
         var read = repository.Get<IReadService>();
         var deep = await read.OpenAsync(repository.Root, "projects/test", RetrievalDepth.Deep, NodeViewType.Index, repository.Token);
         var focused = await read.OpenAsync(repository.Root, "projects/test", RetrievalDepth.Pointer, NodeViewType.State, repository.Token);

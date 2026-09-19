@@ -1,3 +1,4 @@
+using FractalMemory.Core.Infrastructure.Parsing;
 using System.Globalization;
 using System.Text.RegularExpressions;
 using FractalMemory.Core.Domain.Models;
@@ -34,9 +35,6 @@ internal static partial class RetrievalPipeline
         "the", "and", "for", "with", "from", "that", "this", "what", "when", "where", "which", "who", "did", "does",
         "was", "were", "have", "has", "had", "into", "onto", "about", "them", "they", "then", "show", "only", "latest",
     };
-
-    [GeneratedRegex(@"^\s{0,3}#{1,6}\s+(.*)$")]
-    private static partial Regex HeadingRegex();
 
     [GeneratedRegex(
         @"\b(?:" +
@@ -90,39 +88,8 @@ internal static partial class RetrievalPipeline
 
     public static IReadOnlyList<MarkdownSection> ParseSections(string markdown)
     {
-        var normalized = NormalizeLineEndings(markdown);
-        var lines = normalized.Split('\n');
-        var sections = new List<MarkdownSection>();
-        string currentHeading = "Document";
-        var currentStart = 1;
-        var buffer = new List<string>();
-
-        for (var index = 0; index < lines.Length; index++)
-        {
-            var line = lines[index];
-            var match = HeadingRegex().Match(line);
-            if (match.Success)
-            {
-                if (buffer.Count > 0)
-                {
-                    sections.Add(new MarkdownSection(currentHeading, currentStart, index, buffer.ToArray()));
-                }
-
-                currentHeading = match.Groups[1].Value.Trim();
-                currentStart = index + 2;
-                buffer = new List<string>();
-                continue;
-            }
-
-            buffer.Add(line);
-        }
-
-        if (buffer.Count > 0)
-        {
-            sections.Add(new MarkdownSection(currentHeading, currentStart, lines.Length, buffer.ToArray()));
-        }
-
-        return sections;
+        return FractalMemory.Core.Infrastructure.Parsing.MemoryMarkdown.Sections(markdown, hasFrontMatter: false)
+            .Select(section => new MarkdownSection(section.Title, section.StartLine, section.EndLine, section.Content.Split('\n'))).ToArray();
     }
 
     public static IReadOnlyList<SnippetCandidate> BuildSearchCandidates(
@@ -219,9 +186,13 @@ internal static partial class RetrievalPipeline
             return;
         }
 
-        var sections = ParseSections(content)
-            .Where(item => item.Lines.Any(line => !string.IsNullOrWhiteSpace(line)))
-            .ToArray();
+        var managedDecisions = fileName == node.DecisionsFileName ? DecisionLog.Read(content, hasFrontMatter: false) : [];
+        var activeHeadings = managedDecisions.Where(d => d.Status == "active").Select(d => $"Decision {d.Id}").ToHashSet(StringComparer.Ordinal);
+        var knowledge = MemoryMarkdown.Knowledge(content);
+        var candidateSections = managedDecisions.Count == 0 ? ParseSections(knowledge)
+            : MemoryMarkdown.HeadingSections(knowledge, hasFrontMatter: false).Where(s => activeHeadings.Contains(s.Title))
+                .Select(s => new MarkdownSection(s.Title, s.StartLine, s.EndLine, s.Content.Split('\n'))).ToArray();
+        var sections = candidateSections.Where(item => item.Lines.Any(line => !string.IsNullOrWhiteSpace(line))).ToArray();
         var section = preferredHeading == "Current State"
             ? sections.FirstOrDefault(item => item.Heading.Equals("Current Objective", StringComparison.OrdinalIgnoreCase) ||
                 item.Heading.Equals("Current Goal", StringComparison.OrdinalIgnoreCase))

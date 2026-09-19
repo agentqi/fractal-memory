@@ -6,9 +6,6 @@ namespace FractalMemory.Core.Infrastructure.Parsing;
 
 public sealed partial class StructuredMemoryService : IStructuredMemoryService
 {
-    [GeneratedRegex(@"^\s{0,3}#{1,6}\s+(.*)$")]
-    private static partial Regex HeadingRegex();
-
     [GeneratedRegex(@"[^a-z0-9/ ]")]
     private static partial Regex NormalizeHeadingRegex();
 
@@ -38,11 +35,12 @@ public sealed partial class StructuredMemoryService : IStructuredMemoryService
 
     public StructuredMemoryFields Parse(string markdown, string fallbackProjectBranch)
     {
+        markdown = MemoryMarkdown.Knowledge(markdown);
         var sections = ParseSections(markdown);
         var fields = new StructuredMemoryFields
         {
             ProjectBranch = FirstValue(sections, "project_branch") ?? fallbackProjectBranch,
-            CurrentObjective = FirstValue(sections, "current_objective") ?? FallbackObjective(markdown),
+            CurrentObjective = FirstValue(sections, "current_objective") ?? (MemoryMarkdown.Headings(markdown, hasFrontMatter: false).Any(h => SectionKey(h.Title) == "current_objective") ? null : FallbackObjective(markdown)),
             KeyDecisionsInForce = ListValue(sections, "key_decisions"),
             ActiveConstraints = ListValue(sections, "active_constraints").Count > 0
                 ? ListValue(sections, "active_constraints")
@@ -80,27 +78,30 @@ public sealed partial class StructuredMemoryService : IStructuredMemoryService
             .DistinctBy(source => $"{source.SourcePath}|{source.SectionHeading}|{source.Excerpt}")
             .ToArray();
 
-        var keyDecisions = parsedState.KeyDecisionsInForce.Count > 0
-            ? parsedState.KeyDecisionsInForce
+        var managedDecisions = DecisionLog.Read(node.DecisionsContent, hasFrontMatter: false);
+        var logDecisions = managedDecisions.Count > 0
+            ? managedDecisions.Where(d => d.Status == "active").Select(d => d.Content).ToArray()
             : parsedDecisions.KeyDecisionsInForce.Count > 0
                 ? parsedDecisions.KeyDecisionsInForce
-                : ExtractBulletLines(node.DecisionsContent, 4);
+                : ExtractBulletLines(MemoryMarkdown.Knowledge(node.DecisionsContent), 4);
+        var keyDecisions = parsedState.KeyDecisionsInForce.Concat(logDecisions).Distinct(StringComparer.Ordinal).ToArray();
+        var objective = parsedState.CurrentObjective ?? MeaningfulSummary(node);
 
         var activeConstraints = parsedState.ActiveConstraints.Count > 0
             ? parsedState.ActiveConstraints
-            : ExtractPotentialConstraintLines(node.StateContent);
+            : ExtractPotentialConstraintLines(MemoryMarkdown.Knowledge(node.StateContent));
 
         var nextActions = parsedState.NextBestActions.Count > 0
             ? parsedState.NextBestActions
             : [];
 
         var missingInformation = new List<string>();
-        if (string.IsNullOrWhiteSpace(parsedState.CurrentObjective))
+        if (string.IsNullOrWhiteSpace(objective))
         {
             missingInformation.Add("Current Objective");
         }
 
-        if (keyDecisions.Count == 0)
+        if (keyDecisions.Length == 0)
         {
             missingInformation.Add("Key Prior Decision");
         }
@@ -118,7 +119,7 @@ public sealed partial class StructuredMemoryService : IStructuredMemoryService
         return new AnswerContextPacket
         {
             ProjectBranch = parsedState.ProjectBranch ?? node.RelativePath,
-            CurrentObjective = parsedState.CurrentObjective ?? node.Metadata.Summary,
+            CurrentObjective = objective,
             KeyPriorDecisions = keyDecisions,
             ActiveConstraints = activeConstraints,
             NextBestActions = nextActions,
@@ -128,30 +129,20 @@ public sealed partial class StructuredMemoryService : IStructuredMemoryService
         };
     }
 
+    public static string? MeaningfulSummary(MemoryNode node)
+    {
+        var summary = node.Metadata.Summary?.Trim();
+        return string.IsNullOrWhiteSpace(summary) || summary == $"Summary for {node.Metadata.Title}." ||
+            summary == "Entry point for the repository memory tree." ||
+            summary == "Current working state for the overall repository." ||
+            summary == $"Current working truth for {node.Metadata.Title}." ? null : summary;
+    }
+
     private static Dictionary<string, List<string>> ParseSections(string markdown)
     {
         var sections = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
-        string? currentKey = null;
-        var currentLines = new List<string>();
-
-        foreach (var line in NormalizeLineEndings(markdown).Split('\n'))
-        {
-            var headingMatch = HeadingRegex().Match(line);
-            if (headingMatch.Success)
-            {
-                FlushSection(sections, currentKey, currentLines);
-                currentKey = NormalizeHeading(headingMatch.Groups[1].Value);
-                currentLines = new List<string>();
-                continue;
-            }
-
-            if (currentKey is not null)
-            {
-                currentLines.Add(line);
-            }
-        }
-
-        FlushSection(sections, currentKey, currentLines);
+        foreach (var section in MemoryMarkdown.Sections(markdown, hasFrontMatter: false))
+            FlushSection(sections, SectionKey(section.Title), section.Content.Split('\n').ToList());
         return sections;
     }
 
@@ -175,7 +166,7 @@ public sealed partial class StructuredMemoryService : IStructuredMemoryService
         sections[key] = content;
     }
 
-    private static string NormalizeHeading(string heading)
+    public static string SectionKey(string heading)
     {
         var normalized = NormalizeHeadingRegex().Replace(heading.ToLowerInvariant(), " ").Trim();
         normalized = WhitespaceRegex().Replace(normalized, " ");
@@ -213,6 +204,7 @@ public sealed partial class StructuredMemoryService : IStructuredMemoryService
         NormalizeLineEndings(markdown)
             .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Select(CleanListPrefix)
+            .Where(line => !line.StartsWith('#'))
             .Where(line =>
                 line.Contains("constraint", StringComparison.OrdinalIgnoreCase) ||
                 line.Contains("must ", StringComparison.OrdinalIgnoreCase) ||

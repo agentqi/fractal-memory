@@ -10,21 +10,17 @@ public static class CliRunner
         try
         {
             var root = CommandFactory.Create(provider);
-            return await root.Parse(args).InvokeAsync();
+            var parsed = root.Parse(args);
+            if (parsed.Errors.Count > 0 && args.Contains("--json", StringComparer.Ordinal))
+            {
+                CliOutput.WriteError(true, string.Join(" ", parsed.Errors.Select(e => e.Message)));
+                return CliExitCodes.UserError;
+            }
+            return await parsed.InvokeAsync();
         }
-        catch (ArgumentException exception)
+        catch (Exception exception) when (CliOutput.IsUserError(exception))
         {
-            await Console.Error.WriteLineAsync($"Error: {exception.Message}");
-            return CliExitCodes.UserError;
-        }
-        catch (InvalidOperationException exception)
-        {
-            await Console.Error.WriteLineAsync($"Error: {exception.Message}");
-            return CliExitCodes.UserError;
-        }
-        catch (IOException exception)
-        {
-            await Console.Error.WriteLineAsync($"Error: {exception.Message}");
+            CliOutput.WriteError(args.Contains("--json", StringComparer.Ordinal), exception.Message);
             return CliExitCodes.UserError;
         }
         catch (Exception exception)

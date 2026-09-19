@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Preserved curated decisions, custom summaries, heading aliases and thematic breaks in context and exports.
+- Diagnosed damaged decision metadata without breaking retrieval; decision writes remain strict.
+- Reused loaded node/handoff data on resume, marked template guidance explicitly and added human-readable workflow output.
+- Preserved legacy YAML configuration defaults and final newlines on generated documents.
+
+- Added hash-checked section updates, dated timeline entries and managed decisions with supersession across CLI and MCP.
+- Added full document/section/artifact reads with source hashes, source coordinates and native MCP resource links.
+- Added review scheduling, stale/incomplete memory attention lists and explicit archived-node discovery.
+- Added bounded context packs and node-scoped resumption with handoff source-hash comparisons.
+- Added preview-first single-note import with source preservation, duplicate/conflict detection and atomic node staging.
+- Added doctor/index repair, CLI JSON output and actionable MCP validation errors.
+- Shared source-aware heading parsing across workflows and retrieval; ignored legacy scaffold guidance as recorded knowledge and upgraded derived caches to format 3.
 - Preserved HTML inline word boundaries and excluded staging/archive/artifact trees consistently from discovery, recent activity and validation.
 - Existing repositories: older templates wrote `indexing.refresh_on_write: false`, which was previously ignored. Set it to `true` for automatic refresh, then run `fm index refresh`; explicit `false` remains respected. Missing settings now default to `true`, and validation explains this migration when indexes are stale.
 - Search/recent scopes use canonical node segments (lowercase letters, digits and hyphens); `./projects`, underscores and dotted segments are rejected. Rename noncanonical manual directories reported by validation before using them as scopes. Search limits must be positive; omit the limit to use the configured default.

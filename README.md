@@ -108,6 +108,12 @@ dotnet tool install -g FractalMemory.McpServer --add-source ./src/FractalMemory.
 - `fm index refresh`
 - `fm validate`
 
+## Capture, Maintain and Resume Memory
+
+Use `fm read` and hash-checked `fm update` / `fm append` to record working state and decisions safely. `fm attention` surfaces stale or incomplete memory, `fm context` builds bounded source-linked context, and `fm resume` reports changes since the node's latest handoff. `fm doctor --repair` rebuilds indexes; `fm import` previews existing notes before saving them. All commands support `--json`.
+
+See [Memory workflows](docs/memory-workflows.md) for CLI examples, MCP equivalents, source access, decision supersession, review dates, import behavior and the precise context-budget contract.
+
 ## Agent Plugins
 
 FractalMem exposes the same core operations through a stdio MCP server:
@@ -228,6 +234,8 @@ dotnet run --project src/FractalMemory.McpServer
 Configured storage directories cannot be absolute or contain `.` or `..` traversal. Symbolic links and reparse points inside `.fractal-memory/` are rejected so CLI and MCP operations cannot escape the repository boundary.
 
 ## MCP Surface
+
+The capture, freshness, context, resume, repair and import tools are documented in [Memory workflows](docs/memory-workflows.md). `memory_read` and `memory_context` also return native links to full source resources.
 
 Tools:
 

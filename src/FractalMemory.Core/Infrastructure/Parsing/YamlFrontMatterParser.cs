@@ -85,6 +85,8 @@ public sealed class YamlFrontMatterParser : IFrontMatterParser
             builder.AppendLine($"last_updated: {metadata.LastUpdated.Value:O}");
         }
 
+        if (metadata.ReviewAfter is { } reviewAfter) builder.AppendLine($"review_after: {reviewAfter:O}");
+
         if (!string.IsNullOrWhiteSpace(metadata.Owner))
         {
             builder.AppendLine($"owner: {EscapeScalar(metadata.Owner)}");
@@ -120,6 +122,7 @@ public sealed class YamlFrontMatterParser : IFrontMatterParser
             Status = status,
             Priority = priority,
             LastUpdated = lastUpdated,
+            ReviewAfter = ParseDate(source, "review_after"),
         };
     }
 

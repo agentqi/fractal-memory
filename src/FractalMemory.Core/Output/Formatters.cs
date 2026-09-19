@@ -6,6 +6,29 @@ namespace FractalMemory.Core.Output;
 
 public sealed class HumanFormatter : IHumanFormatter
 {
+    public string FormatWorkflow(object value) => value switch
+    {
+        MemoryDocument d => $"Source: {d.SourcePath}\nHash: {d.Hash}\n{d.Content}",
+        MemoryWriteResult w => $"Saved {w.Document.SourcePath}\nHash: {w.Document.Hash}\n" + (w.DecisionId is { } id ? $"Decision: {id}\n" : "") + string.Join('\n', w.Warnings),
+        ContextPack c => c.Text,
+        ResumePacket r => r.Context.Text + $"\nLatest handoff: {r.LatestHandoff?.File ?? "none"}\n" +
+            (r.ComparisonAvailable ? "Changed contract files: " + string.Join(", ", r.ChangedFiles) : "No source snapshot available for comparison.") +
+            "\n" + string.Join('\n', r.Attention.SelectMany(a => a.Reasons)),
+        IReadOnlyList<NodeOverview> list => string.Join('\n', list.Select(n => $"{n.Path} [{n.Status}] {n.Title}")),
+        string text => text,
+        DoctorReport d => FormatValidation(d.Validation) + "\n" + string.Join('\n', d.Advice),
+        ImportResult i => $"{(i.Applied ? "Imported" : i.CanApply ? "Ready to import" : "Import blocked")}: {i.SourceName} -> {i.NodePath}\n" +
+            string.Join('\n', i.Conflicts.Concat(i.DuplicateNodes.Select(n => $"Duplicate source: {n}")).Concat(i.Warnings)) +
+            (!i.Applied && i.CanApply ? "Use --apply to save this import." : ""),
+        IReadOnlyList<DecisionEntry> entries => entries.Count == 0 ? "No managed decisions found." :
+            string.Join("\n\n", entries.Select(d => $"Decision {d.Id} [{d.Status}] {d.RecordedAt}\n{d.Content}")),
+        IReadOnlyList<AttentionItem> items => items.Count == 0 ? "No memories need attention." :
+            string.Join('\n', items.Select(a => $"{a.Path}\n" + string.Join('\n', a.Reasons.Select(r => $"  - {r}")))),
+        IReadOnlyList<HandoffEntry> handoffs => handoffs.Count == 0 ? "No handoffs found." :
+            string.Join('\n', handoffs.Select(h => $"{h.CreatedAt:O}  {h.File}  ({(h.ComparisonAvailable ? "source snapshot available" : "no source snapshot")})")),
+        _ => throw new ArgumentException($"No human formatter for {value.GetType().Name}."),
+    };
+
     public string FormatInitialization(string repositoryRoot) =>
         $"Initialized FractalMem repository at {Path.Combine(repositoryRoot, ".fractal-memory")}";
 
