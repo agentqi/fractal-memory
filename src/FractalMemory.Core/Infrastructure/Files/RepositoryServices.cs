@@ -34,8 +34,7 @@ public sealed class RepositoryService(
                 $"Cannot initialize because FractalMem storage already exists at '{repositoryRoot}' without a valid config.yaml.");
         }
 
-        fileSystemService.CreateDirectory(repositoryRoot);
-        RepositoryPathGuard.EnsureContainedPath(workingDirectory, repositoryRoot);
+        RepositoryPathGuard.CreateContainedDirectory(workingDirectory, ".fractal-memory", fileSystemService);
 
         foreach (var relativeDirectory in new[]
         {
@@ -156,7 +155,7 @@ public sealed class RepositoryService(
             Indexing = GetSection(data, "indexing") is { } indexing ? new IndexingOptions
             {
                 Enabled = GetBool(indexing, "enabled") ?? true,
-                RefreshOnWrite = GetBool(indexing, "refresh_on_write") ?? false,
+                RefreshOnWrite = GetBool(indexing, "refresh_on_write") ?? true,
             } : new IndexingOptions(),
             Retrieval = new RetrievalOptions
             {
@@ -278,6 +277,7 @@ public sealed class NodeService(
             await LoadNodeAsync(repositoryRoot, stagingRelativePath, cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
             fileSystemService.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+            // Recheck after creating ancestors: another process may have replaced one with a link.
             RepositoryPathGuard.EnsureContainedPath(storageRoot, fullPath);
             fileSystemService.MoveDirectory(stagingPath, fullPath);
         }
@@ -306,9 +306,10 @@ public sealed class NodeService(
         var storageRoot = repositoryService.GetStorageRoot(repositoryRoot);
         var config = await repositoryService.LoadConfigAsync(repositoryRoot, cancellationToken);
         var scopedRoot = scope is null ? storageRoot : RepositoryPathGuard.ResolveContainedPath(storageRoot, scope);
-        var fingerprint = scope is null ? ComputeNodeFingerprintForCache(fileSystemService, storageRoot, config.Handoffs.Directory) : null;
-        var cacheKey = Path.GetFullPath(repositoryRoot);
         var useCache = !bypassCache && scope is null && config.Indexing.Enabled;
+        var fingerprint = useCache ? ComputeNodeFingerprintForCache(fileSystemService, storageRoot, config.Handoffs.Directory) : null;
+        var cacheKey = Path.GetFullPath(repositoryRoot);
+        if (bypassCache) _nodeListingCache.TryRemove(cacheKey, out _);
         if (useCache && _nodeListingCache.TryGetValue(cacheKey, out var cached) && string.Equals(cached.Fingerprint, fingerprint, StringComparison.Ordinal))
         {
             return cached.Nodes;
@@ -338,7 +339,7 @@ public sealed class NodeService(
         }
 
         var ordered = nodes.OrderBy(node => node.RelativePath, StringComparer.Ordinal).ToArray();
-        if (scope is null && config.Indexing.Enabled)
+        if (useCache)
         {
             _nodeListingCache[cacheKey] = new NodeListingCacheEntry(fingerprint!, ordered);
         }
@@ -577,11 +578,14 @@ public sealed class ReadService(
     public async Task<OpenNodeResult> OpenAsync(
         string workingDirectory,
         string nodePath,
-        RetrievalDepth depth,
+        RetrievalDepth? depth,
         NodeViewType view,
         CancellationToken cancellationToken)
     {
-        if (!Enum.IsDefined(depth))
+        var repositoryRoot = repositoryService.FindRepositoryRoot(workingDirectory)
+            ?? throw new InvalidOperationException("No FractalMemory repository found.");
+        depth ??= (await repositoryService.LoadConfigAsync(repositoryRoot, cancellationToken)).DefaultDepth;
+        if (!Enum.IsDefined(depth.Value))
         {
             throw new ArgumentOutOfRangeException(nameof(depth), "Retrieval depth must be between 0 and 3.");
         }
@@ -590,8 +594,6 @@ public sealed class ReadService(
             throw new ArgumentOutOfRangeException(nameof(view), "Unknown node view.");
         }
 
-        var repositoryRoot = repositoryService.FindRepositoryRoot(workingDirectory)
-            ?? throw new InvalidOperationException("No FractalMemory repository found.");
         var node = await nodeService.GetNodeAsync(repositoryRoot, nodePath, cancellationToken);
         var children = await nodeService.GetChildNodesAsync(repositoryRoot, node, cancellationToken);
         var structuredState = structuredMemoryService.Parse(node.StateContent, node.RelativePath);
@@ -618,7 +620,7 @@ public sealed class ReadService(
             RelativePath = node.RelativePath,
             Title = title,
             Summary = summary,
-            Depth = depth,
+            Depth = depth.Value,
             View = view,
             IndexSummary = showIndex
                 ? TrimToParagraphs(node.IndexContent, depth == RetrievalDepth.Working ? 2 : 3)
@@ -726,10 +728,14 @@ public sealed class ExportService(
     public async Task<ExportDocument> ExportAsync(
         string workingDirectory,
         string nodePath,
-        ExportMode mode,
+        ExportMode? mode,
         CancellationToken cancellationToken)
     {
-        if (!Enum.IsDefined(mode))
+        var repositoryRoot = repositoryService.FindRepositoryRoot(workingDirectory)
+            ?? throw new InvalidOperationException("No FractalMemory repository found.");
+        var config = await repositoryService.LoadConfigAsync(repositoryRoot, cancellationToken);
+        mode ??= config.DefaultExportMode;
+        if (!Enum.IsDefined(mode.Value))
         {
             throw new ArgumentOutOfRangeException(nameof(mode), "Export mode must be Compact, Standard, or Verbose.");
         }
@@ -742,9 +748,6 @@ public sealed class ExportService(
             _ => RetrievalDepth.Orientation,
         };
 
-        var repositoryRoot = repositoryService.FindRepositoryRoot(workingDirectory)
-            ?? throw new InvalidOperationException("No FractalMemory repository found.");
-        var config = await repositoryService.LoadConfigAsync(repositoryRoot, cancellationToken);
         var node = await nodeService.GetNodeAsync(repositoryRoot, nodePath, cancellationToken);
         var opened = await readService.OpenAsync(workingDirectory, nodePath, depth, NodeViewType.Index, cancellationToken);
         var evidence = FractalMemory.Core.Infrastructure.Search.SearchService.BuildNodeEvidence(node, config.Retrieval.MaxSnippetLines);
@@ -758,7 +761,7 @@ public sealed class ExportService(
         {
             RelativePath = opened.RelativePath,
             Title = opened.Title,
-            Mode = mode,
+            Mode = mode.Value,
             Summary = opened.Summary,
             CurrentState = opened.CurrentState ?? string.Empty,
             Children = opened.Children,
@@ -817,8 +820,7 @@ public sealed class HandoffService(
         var safeName = opened.RelativePath.Replace('/', '-');
         var storageRoot = repositoryService.GetStorageRoot(repositoryRoot);
         var handoffDirectory = RepositoryPathGuard.ResolveContainedPath(storageRoot, config.Handoffs.Directory);
-        fileSystemService.CreateDirectory(handoffDirectory);
-        RepositoryPathGuard.EnsureContainedPath(storageRoot, handoffDirectory);
+        RepositoryPathGuard.CreateContainedDirectory(storageRoot, config.Handoffs.Directory, fileSystemService);
         var fileName = $"{timestamp}-{safeName}-{Guid.NewGuid():N}.md";
         var fullPath = RepositoryPathGuard.ResolveContainedPath(handoffDirectory, fileName);
 
@@ -932,6 +934,20 @@ public sealed class ValidationService(
 
     public async Task<ValidationReport> ValidateAsync(string workingDirectory, CancellationToken cancellationToken)
     {
+        try { return await ValidateCoreAsync(workingDirectory, cancellationToken); }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return new ValidationReport { Issues = [new ValidationIssue
+            {
+                Severity = ValidationSeverity.Error,
+                RelativePath = ".",
+                Message = $"Could not inspect repository storage: {exception.Message} Check file and directory permissions.",
+            }] };
+        }
+    }
+
+    private async Task<ValidationReport> ValidateCoreAsync(string workingDirectory, CancellationToken cancellationToken)
+    {
         var repositoryRoot = repositoryService.FindRepositoryRoot(workingDirectory)
             ?? throw new InvalidOperationException("No FractalMemory repository found.");
         var config = await repositoryService.LoadConfigAsync(repositoryRoot, cancellationToken);
@@ -948,7 +964,7 @@ public sealed class ValidationService(
         }
 
         var memoryFiles = EnumerateMemoryFiles(storageRoot)
-            .Where(path => !IsIgnoredValidationPath(storageRoot, path, config.Handoffs.Directory))
+            .Where(path => !NodeService.IsExcludedNodeContent(storageRoot, path, config.Handoffs.Directory))
             .ToArray();
         var filesByDirectory = memoryFiles
             .GroupBy(path => Path.GetDirectoryName(path), StringComparer.Ordinal)
@@ -1096,7 +1112,9 @@ public sealed class ValidationService(
             {
                 Severity = ValidationSeverity.Warning,
                 RelativePath = "indexes",
-                Message = "Indexes may be stale.",
+                Message = "Indexes may be stale. Run 'fm index refresh'." +
+                    (config.Indexing.Enabled && !config.Indexing.RefreshOnWrite
+                        ? " Set indexing.refresh_on_write: true in config.yaml to refresh automatically after writes; older templates explicitly disabled this setting." : ""),
             });
         }
 
@@ -1128,23 +1146,12 @@ public sealed class ValidationService(
 
             foreach (var child in children)
             {
-                if (!IsIgnoredValidationPath(storageRoot, Path.Combine(child, "_"), handoffDirectory))
+                if (!NodeService.IsExcludedNodeContent(storageRoot, child, handoffDirectory))
                 {
                     pending.Push(child);
                 }
             }
         }
-    }
-
-    private static bool IsIgnoredValidationPath(string storageRoot, string path, string handoffDirectory)
-    {
-        var relative = Path.GetRelativePath(storageRoot, path).Replace(Path.DirectorySeparatorChar, '/');
-        return relative.StartsWith("templates/", StringComparison.Ordinal) ||
-            relative.StartsWith(".staging/", StringComparison.Ordinal) ||
-            relative.StartsWith("handoffs/", StringComparison.Ordinal) ||
-            relative.StartsWith(handoffDirectory + "/", StringComparison.Ordinal) ||
-            relative.StartsWith("indexes/", StringComparison.Ordinal) ||
-            relative.Contains("/artifacts/", StringComparison.Ordinal);
     }
 
     private static Dictionary<string, string> BuildNodeFileMap(IEnumerable<string> files)

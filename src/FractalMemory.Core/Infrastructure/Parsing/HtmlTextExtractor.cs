@@ -39,8 +39,8 @@ internal static class HtmlTextExtractor
         content = BlockRegex.Replace(content, "\n\n");
         content = ListItemRegex.Replace(content, "\n- ");
         content = LineBreakRegex.Replace(content, "\n");
-        content = WebUtility.HtmlDecode(TagRegex.Replace(content, ""));
-        content = string.Join('\n', content.Split('\n').Select(line => line.Trim()));
+        content = WebUtility.HtmlDecode(TagRegex.Replace(content, " "));
+        content = string.Join('\n', content.Split('\n').Select(line => WhitespaceRegex.Replace(line, " ").Trim()));
         return Regex.Replace(content, @"\n{3,}", "\n\n").Trim();
     }
 
@@ -57,5 +57,5 @@ internal static class HtmlTextExtractor
     }
 
     private static string InlineText(string html) =>
-        WhitespaceRegex.Replace(WebUtility.HtmlDecode(TagRegex.Replace(html, "")), " ").Trim();
+        WhitespaceRegex.Replace(WebUtility.HtmlDecode(TagRegex.Replace(html, " ")), " ").Trim();
 }

@@ -1,7 +1,18 @@
+using FractalMemory.Core.Application.Services;
+
 namespace FractalMemory.Core.Infrastructure.Files;
 
 public static class RepositoryPathGuard
 {
+    public static string CreateContainedDirectory(string rootPath, string relativePath, IFileSystemService fileSystem)
+    {
+        var path = ResolveContainedPath(rootPath, relativePath);
+        fileSystem.CreateDirectory(path);
+        // Creation can race with changes to ancestors; validate again before using the directory.
+        EnsureContainedPath(rootPath, path);
+        return path;
+    }
+
     public static string ResolveContainedPath(string rootPath, string relativePath)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(rootPath);

@@ -101,8 +101,6 @@ public sealed class IndexService(
 
             if (manifest.Nodes.TryGetValue(node.RelativePath, out var existing) &&
                 existing is not null && existing.CacheFile == cacheFileName &&
-                existing.FileHashes is not null &&
-                HashesEqual(existing.FileHashes, hashes) &&
                 existing.CacheHash == cacheHash &&
                 fileSystemService.FileExists(cacheFilePath) &&
                 Hash(await fileSystemService.ReadAllTextAsync(cacheFilePath, cancellationToken)) == cacheHash)
@@ -211,24 +209,6 @@ public sealed class IndexService(
         };
     }
 
-    private static bool HashesEqual(IReadOnlyDictionary<string, string> left, IReadOnlyDictionary<string, string> right)
-    {
-        if (left.Count != right.Count)
-        {
-            return false;
-        }
-
-        foreach (var (key, value) in left)
-        {
-            if (!right.TryGetValue(key, out var other) || !string.Equals(value, other, StringComparison.Ordinal))
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
     internal static string Hash(string content)
     {
         var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(content));
@@ -236,5 +216,7 @@ public sealed class IndexService(
     }
 
     private static string SanitizePath(string relativePath) =>
-        relativePath.Replace('/', '_').Replace('\\', '_');
+        System.Text.RegularExpressions.Regex.IsMatch(relativePath, @"^[a-z0-9/-]+$")
+            ? relativePath.Replace('/', '_')
+            : "_legacy_" + Hash(relativePath);
 }

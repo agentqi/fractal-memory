@@ -39,7 +39,7 @@ public sealed class OpenNodeUseCase(IReadService readService)
     public Task<OpenNodeResult> ExecuteAsync(
         string workingDirectory,
         string nodePath,
-        RetrievalDepth depth,
+        RetrievalDepth? depth,
         NodeViewType view,
         CancellationToken cancellationToken) =>
         readService.OpenAsync(workingDirectory, nodePath, depth, view, cancellationToken);
@@ -61,7 +61,7 @@ public sealed class ExportUseCase(IExportService exportService)
     public Task<ExportDocument> ExecuteAsync(
         string workingDirectory,
         string nodePath,
-        ExportMode mode,
+        ExportMode? mode,
         CancellationToken cancellationToken) =>
         exportService.ExportAsync(workingDirectory, nodePath, mode, cancellationToken);
 }

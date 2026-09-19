@@ -55,11 +55,10 @@ public static class CommandFactory
         open.SetAction((parseResult, cancellationToken) => ExecuteAsync(parseResult, async () =>
         {
             var useCase = provider.GetRequiredService<OpenNodeUseCase>();
-            var config = await LoadConfigAsync(provider, cancellationToken);
             var result = await useCase.ExecuteAsync(
                 Environment.CurrentDirectory,
                 parseResult.GetRequiredValue(openPathArgument),
-                parseResult.GetValue(depthOption) ?? config.DefaultDepth,
+                parseResult.GetValue(depthOption),
                 parseResult.GetValue(viewOption),
                 cancellationToken);
             Write(parseResult, result, formatter.FormatOpen(result));
@@ -93,11 +92,10 @@ public static class CommandFactory
         export.SetAction((parseResult, cancellationToken) => ExecuteAsync(parseResult, async () =>
         {
             var useCase = provider.GetRequiredService<ExportUseCase>();
-            var config = await LoadConfigAsync(provider, cancellationToken);
             var document = await useCase.ExecuteAsync(
                 Environment.CurrentDirectory,
                 parseResult.GetRequiredValue(exportPathArgument),
-                parseResult.GetValue(modeOption) ?? config.DefaultExportMode,
+                parseResult.GetValue(modeOption),
                 cancellationToken);
             Write(parseResult, document, aiFormatter.Format(document));
         }));
@@ -213,14 +211,5 @@ public static class CommandFactory
             }
         }
 
-        static async Task<FractalMemory.Core.Domain.Models.RepositoryConfig> LoadConfigAsync(
-            ServiceProvider provider,
-            CancellationToken cancellationToken)
-        {
-            var repositoryService = provider.GetRequiredService<IRepositoryService>();
-            var repositoryRoot = repositoryService.FindRepositoryRoot(Environment.CurrentDirectory)
-                ?? throw new InvalidOperationException("No FractalMemory repository found.");
-            return await repositoryService.LoadConfigAsync(repositoryRoot, cancellationToken);
-        }
     }
 }
