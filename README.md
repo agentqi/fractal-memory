@@ -1,6 +1,10 @@
 # FractalMem
 
-FractalMem is a local-first structured memory system for AI-assisted work. It stores durable project memory as markdown files in a fractal hierarchy so humans and agents can load only the relevant branch instead of dragging full history into every context.
+**Project memory you can inspect, update, and resume.**
+
+FractalMem keeps a project's current objective, constraints, decisions and next actions in local Markdown/HTML files. Developers and coding agents can read the sources, safely update them, and resume work through a CLI or MCP server.
+
+Start with the [local quickstart and executable demo](docs/quickstart.md). For evaluation, see the [developer pilot kit](docs/pilot/README.md) and [benchmark limitations](docs/benchmarks.md).
 
 FractalMem is designed to run as:
 
@@ -87,12 +91,14 @@ dotnet pack src/FractalMemory.Cli
 dotnet pack src/FractalMemory.McpServer
 ```
 
-Install from a local package output:
+Install the current source checkout into an isolated tool directory:
 
 ```bash
-dotnet tool install -g FractalMemory.Cli --add-source ./src/FractalMemory.Cli/bin/Release
-dotnet tool install -g FractalMemory.McpServer --add-source ./src/FractalMemory.McpServer/bin/Release
+python3 scripts/install-local.py
+python3 scripts/demo.py
 ```
+
+The scripts require Python 3.11+ in addition to the .NET SDK. See the [quickstart](docs/quickstart.md) for Windows commands, MCP configuration and installation options. This path does not depend on a published NuGet release.
 
 ## Example CLI Commands
 

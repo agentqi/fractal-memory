@@ -9,10 +9,11 @@
    - `Build and test (ubuntu-latest)`
    - `Build and test (windows-latest)`
    - `Build and test (macos-latest)`
-   - `Coverage`
    - `Dependency audit`
    - `Package and MCP smoke test`
-   - `Analyze (csharp)`
+   - `Analyze (csharp)` once code scanning is available for the repository
+
+Coverage runs inside the Ubuntu build/test job. CodeQL upload currently requires an available code-scanning entitlement for this private repository; a completed analysis with a failed upload is not a passing security check. Resolve that repository prerequisite before requiring it or advertising a fully green release. Do not disable analysis to hide an upload failure.
 
 Do not enable a required check until it has completed once on `main`; GitHub cannot require a check it has not observed.
 
