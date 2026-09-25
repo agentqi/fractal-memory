@@ -36,6 +36,14 @@ jobs:
         run: >-
           dotnet test --solution FractalMemory.sln --configuration Release --no-build
           --coverage --coverage-output-format cobertura --results-directory TestResults
+      - name: Install source checkout and run pilot demo
+        shell: pwsh
+        run: |
+          python scripts/install-local.py --tool-dir "$env:RUNNER_TEMP/fractalmem pilot tools"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $cli = if ($IsWindows) { 'fm.exe' } else { 'fm' }
+          python scripts/demo.py --cli "$env:RUNNER_TEMP/fractalmem pilot tools/$cli"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v7.0.1
         if: matrix.os == 'ubuntu-latest'
         with:

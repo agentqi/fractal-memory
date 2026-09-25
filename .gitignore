@@ -3,3 +3,5 @@ obj/
 .vs/
 .DS_Store
 drafts/
+.tools/
+__pycache__/
