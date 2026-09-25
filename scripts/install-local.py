@@ -16,17 +16,21 @@ def main():
     args = parser.parse_args()
     destination = args.tool_dir.expanduser().resolve()
     if destination.exists():
-        parser.error(f'Tool directory already exists: {destination}. Choose a new --tool-dir.')
+        parser.error(f'Tool directory already exists: {destination}. Delete it to reinstall, or choose a new --tool-dir.')
     if not shutil.which('dotnet'):
         parser.error('Install the .NET 10 SDK first: https://dotnet.microsoft.com/download/dotnet/10.0')
-    version = ET.parse(root / 'Directory.Build.props').findtext('.//VersionPrefix')
-    if not version:
-        parser.error('VersionPrefix is missing from Directory.Build.props.')
+    projects = ['FractalMemory.Cli', 'FractalMemory.McpServer']
     with tempfile.TemporaryDirectory(prefix='fractalmem-install-') as temporary:
         packages = Path(temporary) / 'packages'
-        for project in ['FractalMemory.Cli', 'FractalMemory.McpServer']:
+        versions = {}
+        for project in projects:
             subprocess.run(['dotnet', 'pack', str(root / 'src' / project / f'{project}.csproj'),
                             '-c', 'Release', '-o', str(packages)], cwd=root, check=True)
+            # Take the version from the package produced, which reflects any MSBuild overrides.
+            built = list(packages.glob(f'{project}.*.nupkg'))
+            if len(built) != 1:
+                raise SystemExit(f'Expected one {project} package in {packages}, found {len(built)}.')
+            versions[project] = built[0].name[len(project) + 1:-len('.nupkg')]
         # Install only the exact packages just built; do not race a remote feed with the same version.
         config = ET.Element('configuration')
         sources = ET.SubElement(config, 'packageSources')
@@ -37,20 +41,23 @@ def main():
         install_env = {**os.environ, "NUGET_PACKAGES": str(Path(temporary) / "package-cache")}
         destination.mkdir(parents=True, exist_ok=False)
         try:
-            for package in ['FractalMemory.Cli', 'FractalMemory.McpServer']:
-                subprocess.run(['dotnet', 'tool', 'install', package, '--tool-path', str(destination),
-                                '--version', version, '--configfile', str(config_path), '--no-http-cache'],
-                               env=install_env, check=True)
+            for project in projects:
+                # Run from the checkout so its global.json selects the same SDK that built the packages.
+                subprocess.run(['dotnet', 'tool', 'install', project, '--tool-path', str(destination),
+                                '--version', versions[project], '--configfile', str(config_path), '--no-http-cache'],
+                               cwd=root, env=install_env, check=True)
         except BaseException:
             # This invocation created the directory; existing installations are never removed.
-            shutil.rmtree(destination)
+            # Ignore cleanup errors so they cannot hide the install failure.
+            shutil.rmtree(destination, ignore_errors=True)
             raise
-    print(f'\nInstalled FractalMem {version} from this checkout into {destination}')
+    print(f'\nInstalled FractalMem {versions["FractalMemory.Cli"]} from this checkout into {destination}')
     cli = destination / ('fm.exe' if os.name == 'nt' else 'fm')
     server = destination / ('fractalmem-mcp.exe' if os.name == 'nt' else 'fractalmem-mcp')
+    python = 'py -3' if os.name == 'nt' else 'python3'
     print('CLI: ' + str(cli))
     print('MCP: ' + str(server))
-    print('Try: python scripts/demo.py --cli "' + str(cli) + '"')
+    print(f'Try: {python} "{root / "scripts" / "demo.py"}" --cli "{cli}"')
 
 
 if __name__ == '__main__':

@@ -13,7 +13,7 @@ python3 scripts/demo.py
 
 On Windows use `py -3` instead of `python3`. The scripts also accept absolute paths, including paths with spaces.
 
-The installer builds the CLI and MCP server in Release mode, then installs those exact packages into `.tools/fractalmem/`. It leaves your global tools and agent settings alone. It requires a new destination; for another build use `--tool-dir /absolute/path/to/new-tools` and pass its `fm` executable to the demo with `--cli`.
+The installer builds the CLI and MCP server in Release mode, then installs those exact packages into `.tools/fractalmem/`. It leaves your global tools and agent settings alone. It never overwrites an existing installation: to update after pulling changes, delete that tool directory and run the installer again, so paths in your MCP configuration stay valid. To keep builds side by side, use `--tool-dir /absolute/path/to/new-tools` and pass its `fm` executable to the demo with `--cli`.
 
 The demo uses a temporary project and verifies capture, fresh-process resume, decision supersession and stale-write rejection. To inspect its files afterward:
 
@@ -59,7 +59,7 @@ Use your client's stdio MCP settings to launch the installed server and point it
 }
 ```
 
-Client configuration formats differ; this is not an installer for every client. Use `fractalmem-mcp.exe` and escaped backslashes on Windows. [Plugin instructions](plugins.md) cover the bundled Codex and Claude Code integrations.
+Client configuration formats differ; this is not an installer for every client. Use `fractalmem-mcp.exe` and escaped backslashes on Windows. [Plugin instructions](plugins.md) cover the bundled Codex and Claude Code integrations. Those plugins launch `fractalmem-mcp` from `PATH`, so with this pilot install either add the tool directory to the `PATH` your agent client inherits or use the explicit configuration above.
 
 Suggested first agent request:
 
@@ -74,7 +74,8 @@ The context character budget covers `context.text`, including source labels. JSO
 ## If something fails
 
 - `dotnet --info`: confirm .NET 10 SDK is available.
-- “Tool directory already exists”: choose a new `--tool-dir`; existing tools are preserved.
+- “You must install or update .NET to run this application”: the installed tools find .NET through `DOTNET_ROOT` or the default install location, not `PATH`. If .NET was installed with `dotnet-install` or into a custom directory, set `DOTNET_ROOT` to that directory, including in the MCP server's `env`.
+- “Tool directory already exists”: delete it to reinstall, or choose a new `--tool-dir`; existing tools are never overwritten.
 - Repository not found: run from your project or set `FRACTALMEM_REPOSITORY_ROOT` for MCP.
 - Stale hash: read again, reconcile the newer content, then write with the new hash.
 - Missing or malformed memory: run `fm doctor`; use `fm doctor --repair` to rebuild derived indexes after source errors are corrected.

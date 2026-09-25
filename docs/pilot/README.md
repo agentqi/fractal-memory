@@ -20,7 +20,7 @@ This is a directional usability pilot. A small convenience sample cannot establi
 
 ## What to record
 
-Use [sessions.csv](sessions.csv), one row per resumption. Keep participant details separately from IDs. Leave unavailable values blank, not zero. Use seconds for time and yes/no for outcomes. `supported_next_action` means the proposed action matches the participant's current intended action and cites the relevant current evidence. Record stale/cross-project mistakes even when the task later succeeds.
+Use [sessions.csv](sessions.csv), one row per resumption. Set `task_set` to the project or task set (A or B) so method and task effects can be separated. Keep participant details separately from IDs. Leave unavailable values blank, not zero. Use seconds for time and yes/no for outcomes. `supported_next_action` means the proposed action matches the participant's current intended action and cites the relevant current evidence. Record stale/cross-project mistakes even when the task later succeeds.
 
 At the interview ask:
 
@@ -45,6 +45,6 @@ If setup dominates, simplify distribution first. If maintenance dominates, impro
 
 ## Invitation draft
 
-> I’m testing FractalMem, a local project-memory tool for developers who work with coding agents across multiple sessions. It keeps objectives, constraints, decisions and handoffs in files you can inspect and edit. I’m looking for a two-week trial with a few real project resumptions and a short feedback interview. You can keep your repository private and share only redacted examples. The trial needs a .NET 10 SDK and a source checkout; it is early software. Would that fit your workflow?
+> I’m testing FractalMem, a local project-memory tool for developers who work with coding agents across multiple sessions. It keeps objectives, constraints, decisions and handoffs in files you can inspect and edit. I’m looking for a two-week trial with a few real project resumptions and a short feedback interview. You can keep your repository private and share only redacted examples. The trial needs a .NET 10 SDK, Python 3.11+ and a source checkout; it is early software. Would that fit your workflow?
 
 This is a draft. Select recipients and confirm the message before sending it. Public access and package distribution must be ready before posting an open invitation.
