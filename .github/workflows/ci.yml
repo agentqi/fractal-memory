@@ -44,7 +44,7 @@ jobs:
           $cli = if ($IsWindows) { 'fm.exe' } else { 'fm' }
           python scripts/demo.py --cli "$env:RUNNER_TEMP/fractalmem pilot tools/$cli"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - uses: actions/upload-artifact@v7.0.1
+      - uses: actions/upload-artifact@v7.0.2
         if: matrix.os == 'ubuntu-latest'
         with:
           name: coverage
@@ -84,7 +84,7 @@ jobs:
         run: |
           version=$(sed -n 's/.*<VersionPrefix>\([^<]*\)<.*/\1/p' Directory.Build.props)
           bash scripts/smoke-packages.sh artifacts "$version"
-      - uses: actions/upload-artifact@v7.0.1
+      - uses: actions/upload-artifact@v7.0.2
         with:
           name: nuget-packages
           path: |
